@@ -1,0 +1,63 @@
+import streamlit as st
+import google.generativeai as genai
+import os
+import random
+from PIL import Image
+
+# === 設定エリア ===
+# ライブラリーのフォルダ名（ここをあなたのフォルダ名に合わせてください）
+LIBRARY_FOLDER_NAME = 'test_library' 
+
+st.title("🔬 グラム染色 AI相談アプリ")
+st.write("画像をアップロードすると、Geminiが解説し、近い症例を表示します。")
+
+# APIキーの入力欄
+api_key = st.text_input("Gemini APIキーを入力してください", type="password")
+
+if api_key:
+    # Geminiの設定
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+
+    # 画像アップロード
+    uploaded_file = st.file_uploader("顕微鏡写真を選択...", type=["jpg", "png", "jpeg"])
+
+    if uploaded_file is not None:
+        # ユーザーの画像を表示
+        image = Image.open(uploaded_file)
+        st.image(image, caption='アップロードされた画像', use_container_width=True)
+
+        if st.button("AIで解析する"):
+            with st.spinner('Geminiが思考中...'):
+                try:
+                    # 1. ライブラリーにあるフォルダ名（菌種リスト）を取得
+                    if os.path.exists(LIBRARY_FOLDER_NAME):
+                        categories = [f for f in os.listdir(LIBRARY_FOLDER_NAME) if not f.startswith('.')]
+                        categories_str = ", ".join(categories)
+                    else:
+                        categories = []
+                        categories_str = "（ライブラリーが見つかりません）"
+                        st.warning(f"フォルダ '{LIBRARY_FOLDER_NAME}' が見つかりません。フォルダ名を確認してください。")
+
+                    # 2. Geminiへの命令（プロンプト）を作成
+                    prompt = f"""
+                    あなたは臨床微生物学の専門家です。このグラム染色画像を解説してください。
+                    
+                    【出力フォーマット】
+                    1. 所見（染色性、形態、配列など）
+                    2. 推定される菌種グループ
+                    3. 以下のリストの中で、最も近いカテゴリがあれば1つ選んでください。
+                       リスト: [{categories_str}]
+                       
+                    【重要】
+                    最後に必ず「CATEGORY:選択したカテゴリ名」という形式で1行だけ出力してください。
+                    該当なしの場合は「CATEGORY:None」としてください。
+                    """
+
+                    # 3. 画像と命令を送信
+                    response = model.generate_content([prompt, image])
+                    text = response.text
+                    
+                    # 4. 結果の表示
+                    st.markdown("### 🤖 AIの解析結果")
+                    st.write(text.replace("CATEGORY:", "")) # カテゴリ行は
