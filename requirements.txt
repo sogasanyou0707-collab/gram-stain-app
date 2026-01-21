@@ -58,3 +58,5 @@ urllib3==2.6.3
 PyGithub
 PyGithub
 PyGithub
+google-api-python-client
+google-auth

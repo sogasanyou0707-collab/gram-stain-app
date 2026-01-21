@@ -5,19 +5,22 @@ import random
 import io
 from PIL import Image
 from datetime import datetime
-from github import Github # ★追加：GitHub操作用
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 # === 設定エリア ===
-# ★重要：ここにあなたの「GitHubユーザー名/リポジトリ名」を正確に入れてください
-# 例: "sogasanyou0707-collab/gram-stain-app"
-GITHUB_REPO_NAME = "sogasanyou0707-collab/gram-stain-app" 
-
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-st.set_page_config(page_title="グラム染色AI ver7.0 (Cloud Save)", page_icon="🔬")
-st.title("🔬 グラム染色 AI (チーム収集モード)")
+# ★ここに、画像を保存したいGoogleドライブのフォルダIDを入れてください
+# (ブラウザでフォルダを開いた時のURL末尾の乱数部分です)
+# 例: https://drive.google.com/drive/u/0/folders/1abcde12345... ←この部分
+DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
+
+st.set_page_config(page_title="グラム染色AI ver8.0 (G-Drive)", page_icon="🔬")
+st.title("🔬 グラム染色 AI (Drive保存)")
 
 # --- 認証情報の取得 ---
 # Gemini API Key
@@ -26,12 +29,18 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
-# GitHub Token (保存用)
-if "GITHUB_TOKEN" in st.secrets:
-    github_token = st.secrets["GITHUB_TOKEN"]
-else:
-    # ローカル開発用など
-    github_token = None
+# Google Drive Auth (Service Account)
+drive_service = None
+if "GCP_SERVICE_ACCOUNT" in st.secrets:
+    try:
+        # SecretsのJSON情報から認証
+        gcp_info = st.secrets["GCP_SERVICE_ACCOUNT"]
+        creds = service_account.Credentials.from_service_account_info(
+            gcp_info, scopes=['https://www.googleapis.com/auth/drive']
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        st.error(f"Drive認証エラー: {e}")
 
 # --- モデル設定 ---
 model_options = ["gemini-1.5-pro"]
@@ -56,7 +65,6 @@ selected_model_name = st.sidebar.selectbox("モデル", model_options)
 if api_key:
     model = genai.GenerativeModel(selected_model_name)
 
-    # スマホ対応：ファイル選択（カメラ/アルバム共通）
     uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
@@ -66,7 +74,6 @@ if api_key:
         if st.button("AIで解析する"):
             with st.spinner('AIが解析中...'):
                 try:
-                    # ライブラリ一覧取得（GitHub上ではなく、今の環境にあるもの）
                     if os.path.exists(LIBRARY_FOLDER_NAME):
                         categories = [f for f in os.listdir(LIBRARY_FOLDER_NAME) if not f.startswith('.') and f != INBOX_FOLDER_NAME]
                         categories_str = ", ".join(categories)
@@ -97,13 +104,13 @@ if api_key:
                 except Exception as e:
                     st.error(f"エラー: {e}")
 
-        # --- 結果とクラウド保存 ---
+        # --- 結果とDrive保存 ---
         if 'last_result' in st.session_state:
             text = st.session_state['last_result']
             st.markdown("### 🤖 解析結果")
             st.write(text.replace("CATEGORY:", ""))
             
-            # (参考画像表示ロジックは省略せず維持)
+            # (参考画像表示ロジック維持)
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
@@ -116,30 +123,38 @@ if api_key:
 
             st.write("---")
             
-            # ★★★ GitHubへのクラウド保存ボタン ★★★
-            if st.button("☁️ クラウド(Inbox)に保存"):
-                if github_token:
-                    with st.spinner("GitHubに転送中..."):
+            # ★★★ Google Drive 保存ボタン ★★★
+            if st.button("☁️ Googleドライブに保存"):
+                if drive_service and DRIVE_FOLDER_ID:
+                    with st.spinner("Googleドライブに転送中..."):
                         try:
-                            # 1. 画像をデータ化
+                            # 1. 画像データ化
                             img_byte_arr = io.BytesIO()
                             st.session_state['last_image'].save(img_byte_arr, format='PNG')
-                            img_data = img_byte_arr.getvalue()
+                            img_byte_arr.seek(0) # ポインタを戻す
 
-                            # 2. ファイル名生成
+                            # 2. ファイル名
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            file_name = f"{INBOX_FOLDER_NAME}/{timestamp}.png"
+                            file_name = f"{timestamp}.png"
 
-                            # 3. GitHubへプッシュ
-                            g = Github(github_token)
-                            repo = g.get_repo(GITHUB_REPO_NAME)
-                            repo.create_file(file_name, f"Add image {timestamp}", img_data, branch="main")
+                            # 3. アップロード
+                            file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
+                            media = MediaIoBaseUpload(img_byte_arr, mimetype='image/png', resumable=True)
                             
-                            st.success(f"✅ 保存成功！\nGitHubのInboxに追加されました。\n管理者は 'git pull' で取得できます。")
+                            file = drive_service.files().create(
+                                body=file_metadata,
+                                media_body=media,
+                                fields='id'
+                            ).execute()
+                            
+                            st.success(f"✅ 保存成功！\nGoogleドライブに保存されました。\nFile ID: {file.get('id')}")
                         except Exception as e:
                             st.error(f"保存失敗: {e}")
                 else:
-                    st.error("⚠️ GitHubトークンが設定されていません。管理者に連絡してください。")
+                    if not drive_service:
+                        st.error("⚠️ Googleドライブ設定(Secrets)がされていません。")
+                    if not DRIVE_FOLDER_ID:
+                        st.error("⚠️ 保存先フォルダIDが設定されていません。")
 
 else:
     st.info("👈 APIキー設定が必要です。")
