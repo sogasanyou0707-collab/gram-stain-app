@@ -3,44 +3,32 @@ import google.generativeai as genai
 import os
 import random
 import io
+import requests # ★追加：HTTP通信用
+import base64   # ★追加：画像を文字データに変換用
 from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
 # === 設定エリア ===
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-# ★ここに、画像を保存したいGoogleドライブのフォルダIDを入れてください
-# (ブラウザでフォルダを開いた時のURL末尾の乱数部分です)
-# 例: https://drive.google.com/drive/u/0/folders/1abcde12345... ←この部分
-DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
+st.set_page_config(page_title="グラム染色AI ver9.0 (GAS)", page_icon="🔬")
+st.title("🔬 グラム染色 AI (チーム共有)")
 
-st.set_page_config(page_title="グラム染色AI ver8.0 (G-Drive)", page_icon="🔬")
-st.title("🔬 グラム染色 AI (Drive保存)")
-
-# --- 認証情報の取得 ---
-# Gemini API Key
+# --- 設定値の取得 ---
+# 1. Gemini API Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
     api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
-# Google Drive Auth (Service Account)
-drive_service = None
-if "GCP_SERVICE_ACCOUNT" in st.secrets:
-    try:
-        # SecretsのJSON情報から認証
-        gcp_info = st.secrets["GCP_SERVICE_ACCOUNT"]
-        creds = service_account.Credentials.from_service_account_info(
-            gcp_info, scopes=['https://www.googleapis.com/auth/drive']
-        )
-        drive_service = build('drive', 'v3', credentials=creds)
-    except Exception as e:
-        st.error(f"Drive認証エラー: {e}")
+# 2. GASのURL (さっきコピーしたやつ)
+GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
+
+# 3. GoogleドライブのフォルダID
+DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
+
 
 # --- モデル設定 ---
 model_options = ["gemini-1.5-pro"]
@@ -104,13 +92,13 @@ if api_key:
                 except Exception as e:
                     st.error(f"エラー: {e}")
 
-        # --- 結果とDrive保存 ---
+        # --- 結果とGAS経由保存 ---
         if 'last_result' in st.session_state:
             text = st.session_state['last_result']
             st.markdown("### 🤖 解析結果")
             st.write(text.replace("CATEGORY:", ""))
             
-            # (参考画像表示ロジック維持)
+            # (参考画像ロジック維持)
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
@@ -123,38 +111,43 @@ if api_key:
 
             st.write("---")
             
-            # ★★★ Google Drive 保存ボタン ★★★
+            # ★★★ GAS経由 Drive保存ボタン ★★★
             if st.button("☁️ Googleドライブに保存"):
-                if drive_service and DRIVE_FOLDER_ID:
-                    with st.spinner("Googleドライブに転送中..."):
+                if GAS_APP_URL and DRIVE_FOLDER_ID:
+                    with st.spinner("クラウドに転送中..."):
                         try:
-                            # 1. 画像データ化
+                            # 1. 画像をBase64文字列に変換
                             img_byte_arr = io.BytesIO()
                             st.session_state['last_image'].save(img_byte_arr, format='PNG')
-                            img_byte_arr.seek(0) # ポインタを戻す
+                            img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
 
-                            # 2. ファイル名
+                            # 2. 送信データ作成
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            file_name = f"{timestamp}.png"
+                            filename = f"{timestamp}.png"
+                            
+                            payload = {
+                                'image': img_base64,
+                                'filename': filename,
+                                'folderId': DRIVE_FOLDER_ID,
+                                'mimeType': 'image/png'
+                            }
 
-                            # 3. アップロード
-                            file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
-                            media = MediaIoBaseUpload(img_byte_arr, mimetype='image/png', resumable=True)
+                            # 3. GASへ送信
+                            response = requests.post(GAS_APP_URL, json=payload)
                             
-                            file = drive_service.files().create(
-                                body=file_metadata,
-                                media_body=media,
-                                fields='id'
-                            ).execute()
-                            
-                            st.success(f"✅ 保存成功！\nGoogleドライブに保存されました。\nFile ID: {file.get('id')}")
+                            if response.status_code == 200:
+                                res_json = response.json()
+                                if res_json.get('status') == 'success':
+                                    st.success(f"✅ 保存成功！\nGoogleドライブに保存されました。")
+                                else:
+                                    st.error(f"保存失敗(GAS): {res_json.get('message')}")
+                            else:
+                                st.error(f"通信エラー: {response.status_code}")
+
                         except Exception as e:
-                            st.error(f"保存失敗: {e}")
+                            st.error(f"システムエラー: {e}")
                 else:
-                    if not drive_service:
-                        st.error("⚠️ Googleドライブ設定(Secrets)がされていません。")
-                    if not DRIVE_FOLDER_ID:
-                        st.error("⚠️ 保存先フォルダIDが設定されていません。")
+                    st.error("⚠️ 保存先設定(Secrets)が不足しています。")
 
 else:
     st.info("👈 APIキー設定が必要です。")
