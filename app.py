@@ -2,84 +2,86 @@ import streamlit as st
 import google.generativeai as genai
 import os
 import random
-import io  # ★追加：画像をデータに変換するため
+import io
 from PIL import Image
 from datetime import datetime
+from github import Github # ★追加：GitHub操作用
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
+# ★重要：ここにあなたの「GitHubユーザー名/リポジトリ名」を正確に入れてください
+# 例: "sogasanyou0707-collab/gram-stain-app"
+GITHUB_REPO_NAME = "sogasanyou0707-collab/gram-stain-app" 
+
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-st.set_page_config(page_title="グラム染色AI ver6.3 (Download)", page_icon="🔬")
-st.title("🔬 グラム染色 AI相談アプリ (ver6.3)")
+st.set_page_config(page_title="グラム染色AI ver7.0 (Cloud Save)", page_icon="🔬")
+st.title("🔬 グラム染色 AI (チーム収集モード)")
 
-# --- APIキー ---
+# --- 認証情報の取得 ---
+# Gemini API Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
-    st.sidebar.header("⚙️ 設定")
     api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
-# --- モデル選択 ---
-model_options = ["gemini-1.5-pro"] 
+# GitHub Token (保存用)
+if "GITHUB_TOKEN" in st.secrets:
+    github_token = st.secrets["GITHUB_TOKEN"]
+else:
+    # ローカル開発用など
+    github_token = None
+
+# --- モデル設定 ---
+model_options = ["gemini-1.5-pro"]
 if api_key:
     try:
         genai.configure(api_key=api_key)
         for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
+             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
                 if name not in model_options:
                     model_options.append(name)
-    except Exception:
-        pass 
+    except:
+        pass
 default_backups = ["gemini-1.5-flash", "gemini-3-flash-preview"]
 for m in default_backups:
     if m not in model_options:
         model_options.append(m)
 
-st.sidebar.header("🤖 モデル選択")
-selected_model_name = st.sidebar.selectbox("使用するAIモデル", model_options, index=0)
+selected_model_name = st.sidebar.selectbox("モデル", model_options)
 
 # --- メイン処理 ---
 if api_key:
-    try:
-        model = genai.GenerativeModel(selected_model_name)
-    except Exception as e:
-        st.error(f"モデル設定エラー: {e}")
+    model = genai.GenerativeModel(selected_model_name)
 
-    uploaded_file = st.file_uploader("写真を撮影 または アルバムから選択", type=["jpg", "png", "jpeg"])
+    # スマホ対応：ファイル選択（カメラ/アルバム共通）
+    uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption='解析対象の画像', use_container_width=True)
+        st.image(image, caption='解析対象', use_container_width=True)
 
         if st.button("AIで解析する"):
-            st.write("---")
-            with st.spinner(f'AIモデル ({selected_model_name}) が思考中...'):
+            with st.spinner('AIが解析中...'):
                 try:
-                    # ライブラリー確認
+                    # ライブラリ一覧取得（GitHub上ではなく、今の環境にあるもの）
                     if os.path.exists(LIBRARY_FOLDER_NAME):
                         categories = [f for f in os.listdir(LIBRARY_FOLDER_NAME) if not f.startswith('.') and f != INBOX_FOLDER_NAME]
                         categories_str = ", ".join(categories)
                     else:
-                        categories = []
                         categories_str = "なし"
 
                     prompt = f"""
                     あなたは臨床微生物学の専門家です。このグラム染色画像を解説してください。
-                    
                     【出力フォーマット】
-                    1. 所見（染色性、形態、配列など）
-                    2. 推定される菌種グループ
-                    3. 以下のリストの中で、最も近いカテゴリがあれば1つ選んでください。
-                       リスト: [{categories_str}]
-                       
-                    【重要】
-                    最後に必ず「CATEGORY:選択したカテゴリ名」という形式で1行だけ出力してください。
-                    該当なしの場合は「CATEGORY:None」としてください。
+                    1. 所見
+                    2. 推定菌種
+                    3. 最も近いカテゴリ: [{categories_str}]
+                    最後に必ず「CATEGORY:カテゴリ名」を出力。
                     """
-
+                    
                     safety_settings = {
                         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
                         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -90,56 +92,54 @@ if api_key:
                     response = model.generate_content([prompt, image], safety_settings=safety_settings)
                     
                     if response.text:
-                        text = response.text
-                        st.session_state['last_result'] = text
+                        st.session_state['last_result'] = response.text
                         st.session_state['last_image'] = image
-                    else:
-                        st.error("AIからの応答が空でした。")
-
                 except Exception as e:
                     st.error(f"エラー: {e}")
 
-        # --- 結果表示 ---
+        # --- 結果とクラウド保存 ---
         if 'last_result' in st.session_state:
             text = st.session_state['last_result']
             st.markdown("### 🤖 解析結果")
             st.write(text.replace("CATEGORY:", ""))
-
+            
+            # (参考画像表示ロジックは省略せず維持)
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
                     match_category = line.split("CATEGORY:")[1].strip()
-            
-            if match_category and match_category != "None":
-                target_path = os.path.join(LIBRARY_FOLDER_NAME, match_category)
-                if os.path.exists(target_path):
-                    files = [f for f in os.listdir(target_path) if f.lower().endswith(('png', 'jpg', 'jpeg'))]
-                    if files:
-                        ref_image_path = os.path.join(target_path, random.choice(files))
-                        st.success(f"📂 ライブラリー「{match_category}」の画像を表示")
-                        st.image(ref_image_path, caption=f'参照画像: {match_category}', use_container_width=True)
+            if match_category and match_category != "None" and os.path.exists(os.path.join(LIBRARY_FOLDER_NAME, match_category)):
+                 path = os.path.join(LIBRARY_FOLDER_NAME, match_category)
+                 files = [f for f in os.listdir(path) if f.lower().endswith(('png', 'jpg'))]
+                 if files:
+                     st.image(os.path.join(path, random.choice(files)), caption=f'参考: {match_category}', use_container_width=True)
 
             st.write("---")
             
-            # ★ 修正: ダウンロードボタン機能
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                # 画像をバイナリデータに変換
-                buf = io.BytesIO()
-                st.session_state['last_image'].save(buf, format="PNG")
-                byte_im = buf.getvalue()
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                download_filename = f"{timestamp}.png"
-                
-                # ダウンロードボタンを表示
-                st.download_button(
-                    label="📥 画像を保存する",
-                    data=byte_im,
-                    file_name=download_filename,
-                    mime="image/png"
-                )
-                st.caption("※端末のダウンロードフォルダ等に保存されます")
+            # ★★★ GitHubへのクラウド保存ボタン ★★★
+            if st.button("☁️ クラウド(Inbox)に保存"):
+                if github_token:
+                    with st.spinner("GitHubに転送中..."):
+                        try:
+                            # 1. 画像をデータ化
+                            img_byte_arr = io.BytesIO()
+                            st.session_state['last_image'].save(img_byte_arr, format='PNG')
+                            img_data = img_byte_arr.getvalue()
+
+                            # 2. ファイル名生成
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            file_name = f"{INBOX_FOLDER_NAME}/{timestamp}.png"
+
+                            # 3. GitHubへプッシュ
+                            g = Github(github_token)
+                            repo = g.get_repo(GITHUB_REPO_NAME)
+                            repo.create_file(file_name, f"Add image {timestamp}", img_data, branch="main")
+                            
+                            st.success(f"✅ 保存成功！\nGitHubのInboxに追加されました。\n管理者は 'git pull' で取得できます。")
+                        except Exception as e:
+                            st.error(f"保存失敗: {e}")
+                else:
+                    st.error("⚠️ GitHubトークンが設定されていません。管理者に連絡してください。")
 
 else:
-    st.info("👈 Secrets設定が必要です。")
+    st.info("👈 APIキー設定が必要です。")
