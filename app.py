@@ -10,15 +10,15 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-st.set_page_config(page_title="グラム染色AI ver6.0 (Secrets対応)", page_icon="🔬")
-st.title("🔬 グラム染色 AI相談アプリ (ver6.0)")
+st.set_page_config(page_title="グラム染色AI ver6.1 (Camera+Secrets)", page_icon="🔬")
+st.title("🔬 グラム染色 AI相談アプリ (ver6.1)")
 
 # --- APIキーの準備 ---
-# 1. まずStreamlitの「秘密の金庫(Secrets)」を探す
+# 1. Secretsから読み込み
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
-    # 2. 金庫になければ、サイドバーで入力させる（今まで通り）
+    # 2. なければ手動入力
     st.sidebar.header("⚙️ 設定")
     api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
@@ -53,12 +53,27 @@ if api_key:
     except Exception as e:
         st.error(f"モデル設定エラー: {e}")
 
-    # 画像アップロード（カメラ機能は削除し、シンプル化）
-    uploaded_file = st.file_uploader("顕微鏡写真を選択...", type=["jpg", "png", "jpeg"])
+    # ★ タブで入力方法を切り替え
+    tab_cam, tab_up = st.tabs(["📷 その場で撮影", "📁 アルバムから選択"])
+    target_file = None
 
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption='解析対象の画像', use_container_width=True)
+    with tab_cam:
+        camera_file = st.camera_input("クリックして撮影")
+        if camera_file is not None:
+            target_file = camera_file
+    
+    with tab_up:
+        upload_file = st.file_uploader("画像ファイルを選択", type=["jpg", "png", "jpeg"])
+        if upload_file is not None:
+            target_file = upload_file
+
+    # 画像があれば処理開始
+    if target_file is not None:
+        image = Image.open(target_file)
+        
+        # アップロード時のみプレビュー（カメラは既に映っているため）
+        if target_file == upload_file:
+            st.image(image, caption='解析対象の画像', use_container_width=True)
 
         if st.button("AIで解析する"):
             st.write("---")
@@ -141,4 +156,4 @@ if api_key:
                     st.success(f"保存完了: {save_filename}")
 
 else:
-    st.info("👈 APIキーが設定されていません。Secretsを設定するか、サイドバーに入力してください。")
+    st.info("👈 Secrets設定が必要です。設定がない場合はサイドバーに入力してください。")
