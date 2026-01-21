@@ -8,7 +8,7 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.0 (Cloud Lib)", page_icon="🔬")
+st.set_page_config(page_title="グラム染色AI ver10.1 (Fix)", page_icon="🔬")
 st.title("🔬 グラム染色 AI (完全クラウド版)")
 
 # --- Secrets取得 ---
@@ -40,15 +40,21 @@ for m in default_backups:
 selected_model_name = st.sidebar.selectbox("モデル", model_options)
 
 # --- ライブラリ情報の取得 (Googleドライブから) ---
-@st.cache_data(ttl=300) # 5分間は結果を覚えておく（高速化）
+@st.cache_data(ttl=300)
 def fetch_categories_from_drive():
     if not GAS_APP_URL:
         return []
     try:
-        # GASに「フォルダ一覧ちょーだい」と聞く
         res = requests.get(GAS_APP_URL, params={"action": "list_categories"}, timeout=10)
         if res.status_code == 200:
-            return res.json().get("categories", [])
+            raw_categories = res.json().get("categories", [])
+            # ★ここで「Inbox」や「my_gram_app」などの余計なフォルダを除外します
+            filtered = [
+                c for c in raw_categories 
+                if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
+                and not c.startswith(".")
+            ]
+            return filtered
     except:
         pass
     return []
@@ -75,12 +81,16 @@ if api_key:
         if st.button("AIで解析する"):
             with st.spinner('AIが解析中...'):
                 try:
+                    # プロンプトにもカテゴリ一覧を渡すことで、AIがInboxを選ばないようにする
                     prompt = f"""
                     あなたは臨床微生物学の専門家です。このグラム染色画像を解説してください。
                     【出力フォーマット】
                     1. 所見
                     2. 推定菌種
-                    3. 最も近いカテゴリ: [{categories_str}]
+                    3. 以下のリストの中から、最も近いカテゴリを1つ選んでください。
+                       リスト: [{categories_str}]
+                       (※リストに適切なものがない場合は None としてください)
+                       
                     最後に必ず「CATEGORY:カテゴリ名」を出力。
                     """
                     safety_settings = {
@@ -108,21 +118,21 @@ if api_key:
                 if "CATEGORY:" in line:
                     match_category = line.split("CATEGORY:")[1].strip()
             
-            # ★ドライブから参照画像を取得して表示
-            if match_category and match_category != "None" and match_category in categories:
+            # ドライブから参照画像を取得
+            # ★ Inboxが選ばれていないかチェック
+            if match_category and match_category != "None" and match_category != "Inbox" and match_category in categories:
                 if GAS_APP_URL:
                     with st.spinner(f"☁️ Googleドライブから {match_category} の画像を取得中..."):
                         try:
-                            # GASに「このカテゴリの画像を1枚ちょーだい」と聞く
                             res = requests.get(GAS_APP_URL, params={"action": "get_image", "category": match_category}, timeout=15)
                             data = res.json()
                             if data.get("found"):
-                                # Base64を画像に戻す
                                 img_data = base64.b64decode(data["image"])
                                 ref_image = Image.open(io.BytesIO(img_data))
                                 st.image(ref_image, caption=f'Googleドライブ参照画像: {match_category}', use_container_width=True)
                             else:
-                                st.caption("※ドライブ内のフォルダに画像が見つかりませんでした")
+                                reason = data.get("reason", "不明")
+                                st.caption(f"※参照画像なし: {reason}")
                         except Exception as e:
                             st.caption(f"画像取得エラー: {e}")
 
