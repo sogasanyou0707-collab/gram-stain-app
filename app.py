@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import os
 import random
+import io  # ★追加：画像をデータに変換するため
 from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -10,15 +11,13 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-st.set_page_config(page_title="グラム染色AI ver6.1 (Camera+Secrets)", page_icon="🔬")
-st.title("🔬 グラム染色 AI相談アプリ (ver6.1)")
+st.set_page_config(page_title="グラム染色AI ver6.3 (Download)", page_icon="🔬")
+st.title("🔬 グラム染色 AI相談アプリ (ver6.3)")
 
-# --- APIキーの準備 ---
-# 1. Secretsから読み込み
+# --- APIキー ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
-    # 2. なければ手動入力
     st.sidebar.header("⚙️ 設定")
     api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
@@ -42,10 +41,6 @@ for m in default_backups:
 st.sidebar.header("🤖 モデル選択")
 selected_model_name = st.sidebar.selectbox("使用するAIモデル", model_options, index=0)
 
-# フォルダ準備
-if not os.path.exists(INBOX_FOLDER_NAME):
-    os.makedirs(INBOX_FOLDER_NAME)
-
 # --- メイン処理 ---
 if api_key:
     try:
@@ -53,27 +48,11 @@ if api_key:
     except Exception as e:
         st.error(f"モデル設定エラー: {e}")
 
-    # ★ タブで入力方法を切り替え
-    tab_cam, tab_up = st.tabs(["📷 その場で撮影", "📁 アルバムから選択"])
-    target_file = None
+    uploaded_file = st.file_uploader("写真を撮影 または アルバムから選択", type=["jpg", "png", "jpeg"])
 
-    with tab_cam:
-        camera_file = st.camera_input("クリックして撮影")
-        if camera_file is not None:
-            target_file = camera_file
-    
-    with tab_up:
-        upload_file = st.file_uploader("画像ファイルを選択", type=["jpg", "png", "jpeg"])
-        if upload_file is not None:
-            target_file = upload_file
-
-    # 画像があれば処理開始
-    if target_file is not None:
-        image = Image.open(target_file)
-        
-        # アップロード時のみプレビュー（カメラは既に映っているため）
-        if target_file == upload_file:
-            st.image(image, caption='解析対象の画像', use_container_width=True)
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption='解析対象の画像', use_container_width=True)
 
         if st.button("AIで解析する"):
             st.write("---")
@@ -87,7 +66,6 @@ if api_key:
                         categories = []
                         categories_str = "なし"
 
-                    # プロンプト
                     prompt = f"""
                     あなたは臨床微生物学の専門家です。このグラム染色画像を解説してください。
                     
@@ -127,13 +105,11 @@ if api_key:
             st.markdown("### 🤖 解析結果")
             st.write(text.replace("CATEGORY:", ""))
 
-            # カテゴリ抽出
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
                     match_category = line.split("CATEGORY:")[1].strip()
             
-            # ライブラリー参照
             if match_category and match_category != "None":
                 target_path = os.path.join(LIBRARY_FOLDER_NAME, match_category)
                 if os.path.exists(target_path):
@@ -145,15 +121,25 @@ if api_key:
 
             st.write("---")
             
-            # 保存ボタン
+            # ★ 修正: ダウンロードボタン機能
             col1, col2 = st.columns([1, 2])
             with col1:
+                # 画像をバイナリデータに変換
+                buf = io.BytesIO()
+                st.session_state['last_image'].save(buf, format="PNG")
+                byte_im = buf.getvalue()
+                
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_filename = f"{timestamp}.png"
-                if st.button("📥 画像をInboxに保存"):
-                    save_path = os.path.join(INBOX_FOLDER_NAME, save_filename)
-                    st.session_state['last_image'].save(save_path)
-                    st.success(f"保存完了: {save_filename}")
+                download_filename = f"{timestamp}.png"
+                
+                # ダウンロードボタンを表示
+                st.download_button(
+                    label="📥 画像を保存する",
+                    data=byte_im,
+                    file_name=download_filename,
+                    mime="image/png"
+                )
+                st.caption("※端末のダウンロードフォルダ等に保存されます")
 
 else:
-    st.info("👈 Secrets設定が必要です。設定がない場合はサイドバーに入力してください。")
+    st.info("👈 Secrets設定が必要です。")
