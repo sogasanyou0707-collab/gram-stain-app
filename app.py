@@ -10,15 +10,20 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 LIBRARY_FOLDER_NAME = 'my_gram_app'
 INBOX_FOLDER_NAME = 'Inbox'
 
-st.set_page_config(page_title="グラム染色AI ver4.2 (診断モード)", page_icon="🔬")
-st.title("🔬 グラム染色 AI相談アプリ (ver4.2)")
+st.set_page_config(page_title="グラム染色AI ver6.0 (Secrets対応)", page_icon="🔬")
+st.title("🔬 グラム染色 AI相談アプリ (ver6.0)")
 
-# --- サイドバー ---
-st.sidebar.header("⚙️ 設定")
-api_key = st.sidebar.text_input("Gemini APIキー", type="password")
+# --- APIキーの準備 ---
+# 1. まずStreamlitの「秘密の金庫(Secrets)」を探す
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    # 2. 金庫になければ、サイドバーで入力させる（今まで通り）
+    st.sidebar.header("⚙️ 設定")
+    api_key = st.sidebar.text_input("Gemini APIキー", type="password")
 
-# モデル選択
-model_options = ["gemini-3-flash-preview"] 
+# --- モデル選択 ---
+model_options = ["gemini-1.5-pro"] 
 if api_key:
     try:
         genai.configure(api_key=api_key)
@@ -29,10 +34,12 @@ if api_key:
                     model_options.append(name)
     except Exception:
         pass 
-default_backups = ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"]
+default_backups = ["gemini-1.5-flash", "gemini-3-flash-preview"]
 for m in default_backups:
     if m not in model_options:
         model_options.append(m)
+
+st.sidebar.header("🤖 モデル選択")
 selected_model_name = st.sidebar.selectbox("使用するAIモデル", model_options, index=0)
 
 # フォルダ準備
@@ -46,11 +53,12 @@ if api_key:
     except Exception as e:
         st.error(f"モデル設定エラー: {e}")
 
+    # 画像アップロード（カメラ機能は削除し、シンプル化）
     uploaded_file = st.file_uploader("顕微鏡写真を選択...", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption='アップロード画像', use_container_width=True)
+        st.image(image, caption='解析対象の画像', use_container_width=True)
 
         if st.button("AIで解析する"):
             st.write("---")
@@ -98,7 +106,7 @@ if api_key:
                 except Exception as e:
                     st.error(f"エラー: {e}")
 
-        # --- 結果表示 & 画像参照ロジック ---
+        # --- 結果表示 ---
         if 'last_result' in st.session_state:
             text = st.session_state['last_result']
             st.markdown("### 🤖 解析結果")
@@ -108,42 +116,21 @@ if api_key:
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
-                    # 空白を除去してクリーンにする
                     match_category = line.split("CATEGORY:")[1].strip()
             
-            # === ★ここから診断モード ===
-            st.write("---")
-            st.caption("🔧 システム診断情報 (開発用)")
-            
-            if match_category:
-                st.info(f"AIが指定したカテゴリ名: [{match_category}]")
-                
+            # ライブラリー参照
+            if match_category and match_category != "None":
                 target_path = os.path.join(LIBRARY_FOLDER_NAME, match_category)
-                st.text(f"探しに行ったフォルダ: {target_path}")
-
                 if os.path.exists(target_path):
-                    # フォルダはある。ファイルを探す
                     files = [f for f in os.listdir(target_path) if f.lower().endswith(('png', 'jpg', 'jpeg'))]
-                    st.text(f"見つかった画像ファイル数: {len(files)} 枚")
-                    
                     if files:
-                        # 成功ルート
                         ref_image_path = os.path.join(target_path, random.choice(files))
-                        st.success(f"📂 ライブラリー「{match_category}」の画像を表示します")
+                        st.success(f"📂 ライブラリー「{match_category}」の画像を表示")
                         st.image(ref_image_path, caption=f'参照画像: {match_category}', use_container_width=True)
-                    else:
-                        # フォルダはあるが画像がない
-                        st.warning("⚠️ フォルダは見つかりましたが、中に画像ファイル(png, jpg)が入っていません。")
-                        st.text(f"フォルダの中身: {os.listdir(target_path)}")
-                else:
-                    # フォルダ自体がない
-                    st.error(f"⚠️ フォルダ '{match_category}' が見つかりません。")
-                    st.text(f"現在あるフォルダ一覧: {os.listdir(LIBRARY_FOLDER_NAME)}")
-            else:
-                st.warning("⚠️ AIの回答から 'CATEGORY:' の行が見つけられませんでした。")
 
-            # 保存ボタン
             st.write("---")
+            
+            # 保存ボタン
             col1, col2 = st.columns([1, 2])
             with col1:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -154,4 +141,4 @@ if api_key:
                     st.success(f"保存完了: {save_filename}")
 
 else:
-    st.info("👈 左側のサイドバーにAPIキーを入力してください。")
+    st.info("👈 APIキーが設定されていません。Secretsを設定するか、サイドバーに入力してください。")
