@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.11 (Angle)", page_icon="🔬")
-st.title("🔬 グラム染色AI (角度判定ロジック)")
+st.set_page_config(page_title="グラム染色AI ver10.12 (Shape Detail)", page_icon="🔬")
+st.title("🔬 グラム染色AI (微細形状判定)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -89,49 +89,42 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを修正：角度（Angle）による鑑別を追加
+                        # ★ここを修正：微細形状（ラグビーボール vs こん棒）の判定
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の決定木に従って厳密に診断を行ってください。
+                        あなたは臨床微生物学の専門家です。以下の詳細な基準に従って診断してください。
 
-                        【STEP 1: 色の判定（最優先・絶対ルール）】
-                        * **A. 赤色・ピンク色** (Gram-Negative):
-                          * 判定: **GNR** または **GNC**。
-                          * 禁止: GPR, GPC, Yeast と診断してはいけません。
+                        【STEP 1: 色の判定（最優先）】
+                        * 赤/ピンク → **GNR** (桿菌) または **GNC** (球菌)。(GPR/GPC/Yeastは禁止)
+                        * 紫/青 → **GPC**, **GPR**, **Yeast**。
 
-                        * **B. 紫色・濃青色** (Gram-Positive):
-                          * 判定: GPC, GPR, Yeast のいずれかです。
-
-                        【STEP 2: 紫色(G+菌)の形態鑑別ルール】
+                        【STEP 2: 紫色(G+)菌の精密形態鑑別】
                         
                         1. **Staphylococcus (ブドウ球菌)**:
-                           * 個々の菌体が「正円形」である。
-                           * 配列が「立体的」で「ブドウの房状」のクラスターを作る。
-                           
-                        2. **Streptococcus (連鎖球菌・双球菌)** vs **GPR** の「2連(Pair)」鑑別:
-                           ★ここが最重要ポイントです。2つの菌がつながっている場合、その「角度」を見てください。
-                           
-                           * **Streptococcus (GPC)**:
-                             * 配列の軸が **「直線的 (Straight)」** である。(角度 180度)
-                             * 4連以上の鎖がある場合は、問答無用で Streptococcus。
-                             
-                           * **Corynebacterium (GPR)**:
-                             * 配列の軸が **「折れ曲がっている (Angled / V-shape)」**。(スナッピング分裂による角度)
-                             * 「V字」「L字」「漢字の『八』の字」のような並びであれば GPR を選択。
-                             * 個々の菌体が正円ではなく、やや不整形。
+                           * 「正円形 (Perfect Circle)」かつ「立体的クラスター」。
 
-                        3. **Yeast (真菌)**:
-                           * サイズが明らかに大きい、または卵円形。
+                        2. **Streptococcus (連鎖球菌) / Enterococcus** の形状:
+                           * **形状**: 「正円」または**「ラグビーボール状 (Lancet shape) / 卵円形」**。
+                             * 重要: 端が**「やや尖っている」**場合は Streptococcus (pneumoniae等) を強く示唆します。
+                           * **配列**: 直線的な連鎖、または対（Pair）。
+                           
+                        3. **Corynebacterium (GPR)** の形状:
+                           * **形状**: **「こん棒状 (Club shape)」** または不整形。
+                             * 重要: 片側が太く、片側が細いなど、**「幅が不均一」**であること。
+                             * 端は尖っておらず、丸く膨らんでいることが多い。
+                           * **配列**: V字、L字、柵状（Palisade）。
 
-                        【STEP 3: 混合感染の確認】
-                        明らかに色の異なる2種類がいる場合は併記してください。
+                        【判定の決定打】
+                        * 「2連で、少し伸びている」場合:
+                          * 端が尖っている（ラグビーボール） → **Streptococcus / Enterococcus (GPC)**
+                          * 幅が不均一で、V字に折れている → **Corynebacterium (GPR)**
 
                         【出力フォーマット】
                         1. **所見**:
-                           （色、形態、配列[直線性かV字か]）
+                           （色、個々の形状[正円/ラグビーボール/こん棒]、配列）
                         
                         2. **鑑別診断**:
                            * **検出菌**: [菌種名]
-                             理由: [角度や形状について言及すること]
+                             理由: [形状の尖りや幅の均一性について言及]
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
