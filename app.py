@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.4 (Strict)", page_icon="🔬")
-st.title("🔬 グラム染色 AI (鑑別強化版)")
+st.set_page_config(page_title="グラム染色AI ver10.5 (Balanced)", page_icon="🔬")
+st.title("🔬 グラム染色AI (バランス調整版)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -77,35 +77,38 @@ if api_key:
 
         if st.button("AIで解析する"):
             if len(valid_categories) == 0:
-                st.error("比較用の菌フォルダ(GNR, GPCなど)がGoogleドライブにありません。")
+                st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner('AIが思考中...'):
                     try:
-                        # ★ここを超強化！
+                        # ★ここを修正！優先順位を整理したプロンプト
                         prompt = f"""
-                        あなたは臨床微生物学の超一流の専門家です。画像を批判的に分析してください。
-                        
-                        【重要：陥りやすい罠】
-                        * **コリネバクテリウム（GPR）の誤認**: 
-                          コリネバクテリウム等のグラム陽性桿菌（GPR）は、しばしば球菌（GPC）やブドウ球菌のように見えることがあります（短桿菌、集塊など）。
-                          一見して「ブドウ球菌（Staphylococcus）」に見えても、個々の菌体がわずかに伸びていたり、大小不同があったり、配列が不規則であれば、**必ず「コリネバクテリウム（GPR）」を鑑別に挙げてください。**
-                        * **酵母（Yeast）の誤認**:
-                          サイズが大きい場合や、染色が非常に濃い場合は、細菌ではなく真菌（Yeast）を疑ってください。
+                        あなたは臨床微生物学の専門家です。画像を客観的に分析してください。
+
+                        【診断ロジックの優先順位】
+                        1. **色（染色性）の確認**:
+                           * 赤/ピンク色 → **GNR（グラム陰性桿菌）** または **GNC（グラム陰性球菌）** です。
+                             ※赤色の場合は、原則としてGPR（グラム陽性桿菌）とは診断しないでください。
+                           * 紫/濃青色 → **GPC（グラム陽性球菌）** または **GPR（グラム陽性桿菌）** または **Yeast** です。
+
+                        2. **形と配列の確認**:
+                           * 明らかな「鎖状（チェーン）」 → **Streptococcus（連鎖球菌）**
+                           * 明らかな「ブドウの房状（クラスター）」かつ「真ん丸（球形）」 → **Staphylococcus（ブドウ球菌）**
+                           * **例外判定（GPRの疑い）**:
+                             色が「紫色」で、かつ「完全な球形ではなく、やや伸びている（短桿菌）」や「配列が不規則（V字や柵状）」である場合のみ、**Corynebacterium（GPR）** を強く疑ってください。
 
                         【出力フォーマット】
                         1. **所見**:
-                           （染色性、形態、配列、サイズ感）
+                           （染色性、形態、配列）
                         
-                        2. **鑑別診断（迷い・可能性）**:
-                           ※ここで必ず「断定」を避け、他の可能性について言及すること。
-                           * **本命**: [菌種名]
-                           * **対抗（要確認）**: [菌種名]
-                             理由: （例：「GPCに見えるが、短桿菌様に見える箇所もあり、GPR（コリネバクテリウム）の可能性を強く示唆する」など）
+                        2. **鑑別診断**:
+                           * **第1候補**: [菌種名]
+                           * **第2候補**: [菌種名]（※迷う場合のみ記載。迷わない場合は「特になし」で可）
 
                         3. **最も近いカテゴリ**:
+                           以下のリストから、第1候補に最も近いものを1つ選んでください。
                            リスト: [{categories_str}]
-                           (※もしGPRの可能性があれば、リストにGPR/Corynebacteriumがあればそちらを優先的に検討してください)
                         
                         最後に必ず「CATEGORY:カテゴリ名」という形式で1行だけ出力してください。
                         """
@@ -135,7 +138,6 @@ if api_key:
                 if "CATEGORY:" in line:
                     match_category = line.split("CATEGORY:")[1].strip()
             
-            # 参照画像
             if match_category and match_category != "None" and match_category in valid_categories:
                 if GAS_APP_URL:
                     with st.spinner(f"☁️ 参照画像: {match_category}"):
