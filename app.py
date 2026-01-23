@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.8 (Multi)", page_icon="🔬")
-st.title("🔬 グラム染色AI (混合感染対応)")
+st.set_page_config(page_title="グラム染色AI ver10.9 (Strict Color)", page_icon="🔬")
+st.title("🔬 グラム染色AI (判定ロジック修正版)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -20,7 +20,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定（自動取得・Flash優先）---
+# --- モデル設定（Flash優先・自動取得）---
 model_options = []
 if api_key:
     try:
@@ -89,31 +89,52 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを変更：複数回答を許可するプロンプト
+                        # ★ここを修正：色のルールを絶対視するプロンプト
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。画像を分析してください。
+                        あなたは臨床微生物学の専門家です。以下の決定木（Decision Tree）に従って診断を行ってください。
 
-                        【診断の鉄則】
-                        1. **連鎖球菌**: 「4連以上の鎖」があれば Streptococcus 確定。GPRは除外。
-                        2. **ブドウ球菌 vs GPR**: クラスターならStaph。不規則・短桿菌様なら Corynebacterium (GPR) を考慮。
-                        3. **混合感染の判断**:
-                           * もし画像内に「明らかに異なる2種類以上の菌」がいる場合（例：GPCとGNRが混在している、YeastとGPCがいる等）、**両方を指摘してください。**
+                        【STEP 1: 色の判定（最優先・絶対ルール）】
+                        画像を観察し、菌体の色を判定してください。
+                        
+                        * **A. 赤色・ピンク色の場合** (Red/Pink):
+                          * **判定**: グラム陰性 (Gram-Negative) です。
+                          * **選択肢**: GNR (グラム陰性桿菌), GNC (グラム陰性球菌) のみが候補です。
+                          * **禁止事項**: この色の場合、いかなる理由があっても GPR, GPC, Yeast, Corynebacterium と診断することを**禁止**します。
+
+                        * **B. 紫色・濃青色の場合** (Purple/Blue):
+                          * **判定**: グラム陽性 (Gram-Positive) です。
+                          * **選択肢**: GPC, GPR (Corynebacterium等), Yeast が候補です。
+                          * **禁止事項**: この色の場合、GNR, GNC と診断することを禁止します。
+
+                        【STEP 2: 形態と配列の判定】
+                        STEP 1で絞り込んだ候補の中から、形態で特定してください。
+                        
+                        * **もし「赤色」なら**:
+                          * 桿菌（棒状） → **GNR** (E_coli, Pseudomonas, Klebsiella等)
+                          * 球菌（丸） → **GNC**
+
+                        * **もし「紫色」なら**:
+                          * 連鎖（4連以上） → **Streptococcus**
+                          * 塊状（クラスター） → **Staphylococcus**
+                          * 桿菌様・不規則・V字 → **GPR (Corynebacterium)**
+                          * 巨大・卵円形 → **Yeast**
+
+                        【STEP 3: 混合感染の確認】
+                        明らかに色の異なる2種類（赤と紫など）が混在している場合は、それぞれについて診断してください。
 
                         【出力フォーマット】
                         1. **所見**:
-                           （染色性、形態、配列）
+                           （色、形態、配列）
                         
                         2. **鑑別診断**:
-                           * **検出された菌種**: [菌種A], [菌種B]...
-                             理由: ...
+                           * **検出菌1**: [菌種名] (理由: 色は◯◯で...)
+                           * **検出菌2**: [菌種名] (※ある場合のみ)
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
-                           ※該当するカテゴリを選んでください。
-                           ※もし複数種類いる場合は、**カンマ区切り**で列挙してください。
-                           例: 「CATEGORY: Staphylococcus, E_coli」
+                           ※複数ある場合はカンマ区切り。
                         
-                        最後に必ず「CATEGORY:カテゴリ名1, カテゴリ名2」の形式で出力してください。
+                        最後に必ず「CATEGORY:カテゴリ名」の形式で出力してください。
                         """
                         
                         safety_settings = {
@@ -136,29 +157,22 @@ if api_key:
             display_text = text.replace("CATEGORY:", "") 
             st.write(display_text)
             
-            # ★ここを変更：複数カテゴリの抽出と表示ループ
             match_categories = []
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
-                    # カンマで区切ってリストにする
                     cats_str = line.split("CATEGORY:")[1].strip()
-                    # 全角カンマなどの揺らぎ対策
                     cats_str = cats_str.replace("、", ",")
                     match_categories = [c.strip() for c in cats_str.split(',')]
             
-            # 見つかったカテゴリ分だけループして画像を表示
             if match_categories:
                 st.markdown("---")
                 st.markdown("#### 📚 参考画像ライブラリー")
-                
-                # 画面を分割するカラムを作る（最大3つくらいまで横並び）
                 cols = st.columns(len(match_categories))
                 
                 for i, category in enumerate(match_categories):
-                    # リストにあるか確認
                     if category in valid_categories and category != "None":
                         if GAS_APP_URL:
-                            with cols[i]: # 対応するカラムに表示
+                            with cols[i]:
                                 with st.spinner(f"取得中: {category}..."):
                                     try:
                                         res = requests.get(GAS_APP_URL, params={"action": "get_image", "category": category}, timeout=15)
