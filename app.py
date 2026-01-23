@@ -8,10 +8,10 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.1 (Fix)", page_icon="🔬")
-st.title("🔬 グラム染色 AI (完全クラウド版)")
+st.set_page_config(page_title="グラム染色AI ver10.3 (Diff)", page_icon="🔬")
+st.title("🔬 グラム染色 AI (鑑別診断モード)")
 
-# --- Secrets取得 ---
+# --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
@@ -36,38 +36,35 @@ default_backups = ["gemini-1.5-flash", "gemini-3-flash-preview"]
 for m in default_backups:
     if m not in model_options:
         model_options.append(m)
-
 selected_model_name = st.sidebar.selectbox("モデル", model_options)
 
-# --- ライブラリ情報の取得 (Googleドライブから) ---
-@st.cache_data(ttl=300)
+# --- ライブラリ取得 ---
+@st.cache_data(ttl=60)
 def fetch_categories_from_drive():
     if not GAS_APP_URL:
         return []
     try:
         res = requests.get(GAS_APP_URL, params={"action": "list_categories"}, timeout=10)
         if res.status_code == 200:
-            raw_categories = res.json().get("categories", [])
-            # ★ここで「Inbox」や「my_gram_app」などの余計なフォルダを除外します
-            filtered = [
-                c for c in raw_categories 
-                if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
-                and not c.startswith(".")
-            ]
-            return filtered
+            return res.json().get("categories", [])
     except:
         pass
     return []
 
-# アプリ起動時にドライブからカテゴリ一覧を取得
-with st.spinner('Googleドライブから最新のライブラリを読み込み中...'):
-    categories = fetch_categories_from_drive()
-    if categories:
-        categories_str = ", ".join(categories)
-        st.success(f"📚 クラウド・ライブラリー連携中: {len(categories)} 種の菌データを認識")
+# サイドバー確認用
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📂 認識中のフォルダ")
+with st.spinner('Loading...'):
+    raw_list = fetch_categories_from_drive()
+    valid_categories = [
+        c for c in raw_list 
+        if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
+        and not c.startswith(".")
+    ]
+    if len(valid_categories) == 0:
+        st.sidebar.warning("菌フォルダが見つかりません")
     else:
-        categories_str = "なし"
-        st.warning("⚠️ ライブラリーを読み込めませんでした（GAS設定を確認してください）")
+        st.sidebar.write(valid_categories)
 
 # --- メイン処理 ---
 if api_key:
@@ -79,87 +76,79 @@ if api_key:
         st.image(image, caption='解析対象', use_container_width=True)
 
         if st.button("AIで解析する"):
-            with st.spinner('AIが解析中...'):
-                try:
-                    # プロンプトにもカテゴリ一覧を渡すことで、AIがInboxを選ばないようにする
-                    prompt = f"""
-                    あなたは臨床微生物学の専門家です。このグラム染色画像を解説してください。
-                    【出力フォーマット】
-                    1. 所見
-                    2. 推定菌種
-                    3. 以下のリストの中から、最も近いカテゴリを1つ選んでください。
-                       リスト: [{categories_str}]
-                       (※リストに適切なものがない場合は None としてください)
-                       
-                    最後に必ず「CATEGORY:カテゴリ名」を出力。
-                    """
-                    safety_settings = {
-                        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                    }
-                    response = model.generate_content([prompt, image], safety_settings=safety_settings)
-                    if response.text:
-                        st.session_state['last_result'] = response.text
-                        st.session_state['last_image'] = image
-                except Exception as e:
-                    st.error(f"エラー: {e}")
+            if len(valid_categories) == 0:
+                st.error("比較用の菌フォルダ(GNR, GPCなど)がGoogleドライブにありません。")
+            else:
+                categories_str = ", ".join(valid_categories)
+                with st.spinner('AIが思考中...'):
+                    try:
+                        # ★ここが改良版プロンプト！
+                        prompt = f"""
+                        あなたは臨床微生物学の専門家です。このグラム染色画像を詳細に分析してください。
+                        
+                        【思考プロセス】
+                        まず画像を観察し、染色性（陽性/陰性）、形態（球菌/桿菌）、配列（連鎖/塊状/柵状など）、サイズなどを分析してください。
+                        典型的なパターンだけでなく、「紛らわしい類似菌」の可能性も検討してください。
+
+                        【出力フォーマット】
+                        1. **所見**:
+                           （染色性、形態、配列、サイズ感、背景など）
+                        
+                        2. **鑑別診断（可能性のある菌種）**:
+                           * **第1候補**: [菌種名]
+                             理由: ...
+                           * **第2候補（鑑別）**: [菌種名]
+                             理由: ...（例: 「球菌に見えるが、短桿菌（コリネバクテリウムなど）の可能性も否定できない」など）
+
+                        3. **最も近いカテゴリ**:
+                           以下のリストから、第1候補に最も近いものを1つ選んでください。
+                           リスト: [{categories_str}]
+                        
+                        【重要】
+                        最後に必ず「CATEGORY:カテゴリ名」という形式で1行だけ出力してください。
+                        """
+                        
+                        safety_settings = {
+                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                        }
+                        response = model.generate_content([prompt, image], safety_settings=safety_settings)
+                        if response.text:
+                            st.session_state['last_result'] = response.text
+                            st.session_state['last_image'] = image
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
 
         # --- 結果表示 ---
         if 'last_result' in st.session_state:
             text = st.session_state['last_result']
             st.markdown("### 🤖 解析結果")
-            st.write(text.replace("CATEGORY:", ""))
             
-            # カテゴリ抽出
+            # CATEGORY行だけ隠して表示
+            display_text = text.replace("CATEGORY:", "") 
+            st.write(display_text)
+            
             match_category = None
             for line in text.split('\n'):
                 if "CATEGORY:" in line:
                     match_category = line.split("CATEGORY:")[1].strip()
             
-            # ドライブから参照画像を取得
-            # ★ Inboxが選ばれていないかチェック
-            if match_category and match_category != "None" and match_category != "Inbox" and match_category in categories:
+            # 参照画像
+            if match_category and match_category != "None" and match_category in valid_categories:
                 if GAS_APP_URL:
-                    with st.spinner(f"☁️ Googleドライブから {match_category} の画像を取得中..."):
+                    with st.spinner(f"☁️ 参照画像を取得: {match_category}"):
                         try:
                             res = requests.get(GAS_APP_URL, params={"action": "get_image", "category": match_category}, timeout=15)
                             data = res.json()
                             if data.get("found"):
                                 img_data = base64.b64decode(data["image"])
                                 ref_image = Image.open(io.BytesIO(img_data))
-                                st.image(ref_image, caption=f'Googleドライブ参照画像: {match_category}', use_container_width=True)
+                                st.image(ref_image, caption=f'ライブラリー参照: {match_category}', use_container_width=True)
                             else:
-                                reason = data.get("reason", "不明")
-                                st.caption(f"※参照画像なし: {reason}")
+                                st.caption("※フォルダ内に画像がありません")
                         except Exception as e:
-                            st.caption(f"画像取得エラー: {e}")
+                            st.caption(f"エラー: {e}")
 
-            st.write("---")
-            
-            # 保存ボタン
-            if st.button("☁️ Googleドライブに保存"):
-                if GAS_APP_URL and DRIVE_FOLDER_ID:
-                    with st.spinner("転送中..."):
-                        try:
-                            img_byte_arr = io.BytesIO()
-                            st.session_state['last_image'].save(img_byte_arr, format='PNG')
-                            img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            
-                            payload = {
-                                'image': img_base64,
-                                'filename': f"{timestamp}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            }
-                            response = requests.post(GAS_APP_URL, json=payload)
-                            if response.status_code == 200 and response.json().get('status') == 'success':
-                                st.success(f"✅ 保存成功！")
-                            else:
-                                st.error("保存失敗")
-                        except Exception as e:
-                            st.error(f"エラー: {e}")
-                else:
-                    st.error("⚠️ 設定不足")
+            st
