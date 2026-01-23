@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.13 (Pneumo Fix)", page_icon="🔬")
-st.title("🔬 グラム染色AI (肺炎球菌対応版)")
+st.set_page_config(page_title="グラム染色AI ver10.14 (Color & Rod Fix)", page_icon="🔬")
+st.title("🔬 グラム染色AI (判定精度向上版)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -89,40 +89,44 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを修正：ランセット状（尖り）とこん棒状（丸み）の区別
+                        # ★ここを修正：色の厳格化と、球菌vs桿菌の論理的区別
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の精密な決定木に従って診断してください。
+                        あなたは臨床微生物学の専門家です。以下の基準で診断してください。
 
-                        【STEP 1: 色の判定】
-                        * 赤/ピンク → GNR or GNC (絶対)。
-                        * 紫/青 → GPC, GPR, Yeast。
+                        【STEP 1: 色の判定（赤紫色の扱い）】
+                        * **赤色・ピンク色・赤紫色 (Red / Pink / Red-Purple)**:
+                          * 判定: **グラム陰性 (Gram-Negative)** とみなします。
+                          * 重要: 濃い染色で「紫っぽく」見えても、赤みが混じっている場合は「陰性（GNR/GNC）」と判断してください。
 
-                        【STEP 2: 紫色(G+)菌の「伸びた形」の鑑別】
-                        ★ここが最重要です。「少し伸びた形（Oval）」を見た場合、先端の形状を確認してください。
+                        * **純粋な青色・濃い紫色 (Blue / Deep Purple)**:
+                          * 判定: **グラム陽性 (Gram-Positive)** です。
 
-                        1. **Streptococcus pneumoniae (肺炎球菌)** の特徴:
-                           * **先端**: **「尖っている (Pointed / Lancet shape)」**。ろうそくの炎のような形。
-                           * **配列**: 双球菌 (Diplococci) が主体。
-                           * **判定**: 伸びていても、先が尖っていれば **GPC (Streptococcus)** と診断してください。GPRではありません。
+                        【STEP 2: 球菌(Cocci) vs 桿菌(Rods) の境界線】
+                        「短い菌」の判定で迷わないためのルールです。
+                        
+                        * **A. 桿菌 (Rod/Bacillus) と判断すべき形状**:
+                          1. **側面が平行 (Parallel Sides)**:
+                             * 丸みがあっても、胴体の部分が「直線的」であれば桿菌です。
+                          2. **球桿菌 (Coccobacillus)**:
+                             * 一見丸く見えても、色が「赤/赤紫」であれば、GNR（球桿菌）の可能性が高いです。
+                        
+                        * **B. 球菌 (Cocci) と判断すべき形状**:
+                          1. **全体がカーブしている (Curved edges)**:
+                             * 正円だけでなく、**楕円形（Oval）**や**ランセット状（Lancet）**も含みます。
+                             * 側面が直線的（平行）ではなく、膨らんでいる場合は球菌（GPC）です。
 
-                        2. **Corynebacterium (GPR)** の特徴:
-                           * **先端**: **「丸く膨らんでいる (Club shape / Rounded)」**。こん棒のような形。
-                           * **配列**: V字、L字、柵状。
-                           * **判定**: 先が丸く、太さが不均一な場合のみ GPR と診断してください。
-
-                        3. **Staphylococcus (ブドウ球菌)**:
-                           * 完全な正円 (Perfect Circle) で、房状クラスター。
-
-                        【STEP 3: 混合感染の確認】
-                        明らかに色の異なる2種類がいる場合は併記。
+                        【STEP 3: 鑑別ロジックの適用】
+                        * 「赤紫色」で「短い」場合 → **GNR** (球桿菌の可能性)。
+                        * 「青紫色」で「ランセット状（尖っている）」場合 → **GPC (Streptococcus)**。
+                        * 「青紫色」で「こん棒状・不均一」な場合 → **GPR (Corynebacterium)**。
 
                         【出力フォーマット】
                         1. **所見**:
-                           （色、先端の形状[尖っている/丸い]、配列）
+                           （色[赤紫/青など]、側面の形状[平行/カーブ]）
                         
                         2. **鑑別診断**:
                            * **検出菌**: [菌種名]
-                             理由: 「ランセット状（尖っている）ためGPC」または「こん棒状（丸い）ためGPR」と明記。
+                             理由: [色と形状に基づき論理的に]
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
