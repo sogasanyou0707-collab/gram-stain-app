@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.9 (Strict Color)", page_icon="🔬")
-st.title("🔬 グラム染色AI (判定ロジック修正版)")
+st.set_page_config(page_title="グラム染色AI ver10.10 (Morphology)", page_icon="🔬")
+st.title("🔬 グラム染色AI (形態精密判定)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -20,7 +20,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定（Flash優先・自動取得）---
+# --- モデル設定（Flash優先）---
 model_options = []
 if api_key:
     try:
@@ -89,46 +89,46 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを修正：色のルールを絶対視するプロンプト
+                        # ★ここを修正：正円・立体構造を重視するプロンプト
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の決定木（Decision Tree）に従って診断を行ってください。
+                        あなたは臨床微生物学の専門家です。以下の決定木に従って厳密に診断を行ってください。
 
                         【STEP 1: 色の判定（最優先・絶対ルール）】
-                        画像を観察し、菌体の色を判定してください。
+                        * **A. 赤色・ピンク色** (Gram-Negative):
+                          * 判定: **GNR** (桿菌) または **GNC** (球菌)。
+                          * 禁止: GPR, GPC, Yeast と診断してはいけません。
+
+                        * **B. 紫色・濃青色** (Gram-Positive):
+                          * 判定: GPC, GPR, Yeast のいずれかです。
+                          * 禁止: GNR, GNC と診断してはいけません。
+
+                        【STEP 2: 紫色(G+菌)の形態鑑別ルール】
                         
-                        * **A. 赤色・ピンク色の場合** (Red/Pink):
-                          * **判定**: グラム陰性 (Gram-Negative) です。
-                          * **選択肢**: GNR (グラム陰性桿菌), GNC (グラム陰性球菌) のみが候補です。
-                          * **禁止事項**: この色の場合、いかなる理由があっても GPR, GPC, Yeast, Corynebacterium と診断することを**禁止**します。
+                        1. **Staphylococcus (ブドウ球菌)** の条件:
+                           * 個々の菌体が**「正円形（Perfect Circle）」**であること。
+                           * 配列が**「立体的な重なり（3D Cluster）」**を持ち、**「ブドウの房状」**であること。
+                           
+                        2. **Streptococcus (連鎖球菌)** の条件:
+                           * **「4連以上の明らかな鎖（Chain）」**が見られること。
+                           * 立体的な塊ではなく、平面的に繋がっていること。
 
-                        * **B. 紫色・濃青色の場合** (Purple/Blue):
-                          * **判定**: グラム陽性 (Gram-Positive) です。
-                          * **選択肢**: GPC, GPR (Corynebacterium等), Yeast が候補です。
-                          * **禁止事項**: この色の場合、GNR, GNC と診断することを禁止します。
+                        3. **Corynebacterium (GPR)** の条件:
+                           * 密集していても、個々の菌体が**「正円ではなく、やや不整形・短桿菌様」**であること。
+                           * 「立体的なブドウの房」ではなく、「不規則な並び（V字、柵状）」であること。
 
-                        【STEP 2: 形態と配列の判定】
-                        STEP 1で絞り込んだ候補の中から、形態で特定してください。
-                        
-                        * **もし「赤色」なら**:
-                          * 桿菌（棒状） → **GNR** (E_coli, Pseudomonas, Klebsiella等)
-                          * 球菌（丸） → **GNC**
-
-                        * **もし「紫色」なら**:
-                          * 連鎖（4連以上） → **Streptococcus**
-                          * 塊状（クラスター） → **Staphylococcus**
-                          * 桿菌様・不規則・V字 → **GPR (Corynebacterium)**
-                          * 巨大・卵円形 → **Yeast**
+                        4. **Yeast (真菌)** の条件:
+                           * サイズが明らかに大きい、または卵円形であること。
 
                         【STEP 3: 混合感染の確認】
-                        明らかに色の異なる2種類（赤と紫など）が混在している場合は、それぞれについて診断してください。
+                        明らかに色の異なる2種類がいる場合は併記してください。
 
                         【出力フォーマット】
                         1. **所見**:
-                           （色、形態、配列）
+                           （色、形態[正円か否か]、配列[立体的か平面的か]）
                         
                         2. **鑑別診断**:
-                           * **検出菌1**: [菌種名] (理由: 色は◯◯で...)
-                           * **検出菌2**: [菌種名] (※ある場合のみ)
+                           * **検出菌**: [菌種名]
+                             理由: ...
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
