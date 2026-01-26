@@ -8,8 +8,8 @@ from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.14 (Color & Rod Fix)", page_icon="🔬")
-st.title("🔬 グラム染色AI (判定精度向上版)")
+st.set_page_config(page_title="グラム染色AI ver10.15 (Final)", page_icon="🔬")
+st.title("🔬 グラム染色AI (最終調整版)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -89,44 +89,49 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを修正：色の厳格化と、球菌vs桿菌の論理的区別
+                        # ★修正ポイント：大型桿菌の保護と、赤紫ルールの緩和
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の基準で診断してください。
+                        あなたは臨床微生物学の専門家です。以下の精密な基準で診断してください。
 
-                        【STEP 1: 色の判定（赤紫色の扱い）】
-                        * **赤色・ピンク色・赤紫色 (Red / Pink / Red-Purple)**:
-                          * 判定: **グラム陰性 (Gram-Negative)** とみなします。
-                          * 重要: 濃い染色で「紫っぽく」見えても、赤みが混じっている場合は「陰性（GNR/GNC）」と判断してください。
-
-                        * **純粋な青色・濃い紫色 (Blue / Deep Purple)**:
-                          * 判定: **グラム陽性 (Gram-Positive)** です。
-
-                        【STEP 2: 球菌(Cocci) vs 桿菌(Rods) の境界線】
-                        「短い菌」の判定で迷わないためのルールです。
+                        【STEP 1: 色の判定 (修正版)】
                         
-                        * **A. 桿菌 (Rod/Bacillus) と判断すべき形状**:
-                          1. **側面が平行 (Parallel Sides)**:
-                             * 丸みがあっても、胴体の部分が「直線的」であれば桿菌です。
-                          2. **球桿菌 (Coccobacillus)**:
-                             * 一見丸く見えても、色が「赤/赤紫」であれば、GNR（球桿菌）の可能性が高いです。
+                        * **A. グラム陽性 (G+)**:
+                          * **色**: 紫色、濃青色、黒色。
+                          * **特例**: 菌体が非常に濃い黒紫色であれば、背景がピンクでも、あるいは菌の一部が脱色して赤っぽくなっていても、**基本は「陽性」**と判定してください。(Gram-variable Bacillusの考慮)
                         
-                        * **B. 球菌 (Cocci) と判断すべき形状**:
-                          1. **全体がカーブしている (Curved edges)**:
-                             * 正円だけでなく、**楕円形（Oval）**や**ランセット状（Lancet）**も含みます。
-                             * 側面が直線的（平行）ではなく、膨らんでいる場合は球菌（GPC）です。
+                        * **B. グラム陰性 (G-)**:
+                          * **色**: 明るい赤色、ピンク色。
+                          * **条件**: 菌全体が均一に赤く染まっていること。
 
-                        【STEP 3: 鑑別ロジックの適用】
-                        * 「赤紫色」で「短い」場合 → **GNR** (球桿菌の可能性)。
-                        * 「青紫色」で「ランセット状（尖っている）」場合 → **GPC (Streptococcus)**。
-                        * 「青紫色」で「こん棒状・不均一」な場合 → **GPR (Corynebacterium)**。
+                        【STEP 2: 形態鑑別 (大型桿菌ルール)】
+                        
+                        1. **Bacillus / Clostridium (Large GPR)**:
+                           * **特徴**: 非常に太く、大きい桿菌 (Box-car shape)。
+                           * **判定**: この形状が見えたら、多少色が赤っぽくても **GPR** と診断してください。(古い培養菌は陰性に見えることがあるため)
+
+                        2. **Staphylococcus (GPC)**:
+                           * **特徴**: 正円形、クラスター。
+
+                        3. **Streptococcus (GPC)**:
+                           * **特徴**: 楕円・ランセット状、連鎖、双球菌。
+
+                        4. **GNR (Gram-Negative Rods)**:
+                           * **特徴**: 陽性桿菌に比べて細い、小さい。全体がピンク色。
+                           * **注意**: 赤紫色で短い球桿菌はGNR。
+
+                        【STEP 3: 最終診断】
+                        * 「黒紫色」で「太い棒状」 → **GPR (Bacillus/Clostridium)**
+                        * 「ピンク色」で「細い棒状」 → **GNR**
+                        * 「紫色」で「正円クラスター」 → **Staphylococcus**
+                        * 「紫色」で「ランセット状双球菌」 → **Streptococcus**
 
                         【出力フォーマット】
                         1. **所見**:
-                           （色[赤紫/青など]、側面の形状[平行/カーブ]）
+                           （色、サイズ[太い/細い]、形状）
                         
                         2. **鑑別診断**:
                            * **検出菌**: [菌種名]
-                             理由: [色と形状に基づき論理的に]
+                             理由: [色とサイズに基づき論理的に]
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
