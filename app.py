@@ -37,8 +37,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定 ---
-# あえて flash ではなく pro を優先する（推論能力重視のため）
+# --- モデル設定 (Flash優先) ---
 model_options = []
 if api_key:
     try:
@@ -48,18 +47,17 @@ if api_key:
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
-        # proを先頭に
-        pro_models = sorted([m for m in all_models if "pro" in m.lower()], reverse=True)
         flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
-        model_options = pro_models + flash_models
+        other_models = sorted([m for m in all_models if "flash" not in m.lower()], reverse=True)
+        model_options = flash_models + other_models
     except:
-        model_options = ["gemini-1.5-pro", "gemini-1.5-flash"]
+        model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
 
-st.sidebar.header("🤖 設定")
+st.sidebar.header("🤖 使用モデル")
 if model_options:
-    selected_model_name = st.sidebar.selectbox("モデル", model_options, index=0)
+    selected_model_name = st.sidebar.selectbox("モデルを選択", model_options, index=0)
 else:
-    selected_model_name = "gemini-1.5-pro"
+    selected_model_name = "gemini-1.5-flash"
 
 # --- ライブラリ取得 ---
 @st.cache_data(ttl=60)
@@ -95,7 +93,7 @@ if api_key:
     try:
         model = genai.GenerativeModel(selected_model_name)
     except:
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
     uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
@@ -110,7 +108,7 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★ここを大幅変更：思考プロセスを強制するプロンプト
+                        # ★プロンプト（ver10.17の論理的思考プロセス版を維持）
                         prompt = f"""
                         あなたは臨床微生物学の専門家です。
                         画像を見て、以下の【思考プロセス】の手順通りに観察を行い、論理的に診断してください。
