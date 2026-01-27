@@ -37,7 +37,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定 (Flash優先) ---
+# --- モデル設定 (Flash優先 + 最新Pro指定) ---
 model_options = []
 if api_key:
     try:
@@ -47,14 +47,24 @@ if api_key:
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
+        
+        # Flash系（動作安定・高速）
         flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
-        other_models = sorted([m for m in all_models if "flash" not in m.lower()], reverse=True)
-        model_options = flash_models + other_models
+        
+        # Pro系（最新版 gemini-1.5-pro-latest を優先的に探す）
+        pro_latest = [m for m in all_models if "gemini-1.5-pro-latest" in m]
+        pro_others = sorted([m for m in all_models if "pro" in m.lower() and "latest" not in m], reverse=True)
+        pro_models = pro_latest + pro_others
+
+        # ★デフォルトはFlash（エラー回避）。Proはリストの後ろに追加。
+        model_options = flash_models + pro_models
     except:
-        model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
+        # APIエラー時のフォールバック
+        model_options = ["gemini-1.5-flash", "gemini-1.5-pro-latest"]
 
 st.sidebar.header("🤖 使用モデル")
 if model_options:
+    # デフォルトをFlashにする（リストの先頭）
     selected_model_name = st.sidebar.selectbox("モデルを選択", model_options, index=0)
 else:
     selected_model_name = "gemini-1.5-flash"
@@ -108,51 +118,43 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★プロンプト（ver10.17の論理的思考プロセス版を維持）
+                        # ★プロンプト（物理的特徴解析版を維持）
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。
-                        画像を見て、以下の【思考プロセス】の手順通りに観察を行い、論理的に診断してください。
-                        いきなり結論を出さず、必ずステップごとに確認してください。
+                        あなたは画像解析アルゴリズムです。医学的な推測をする前に、画像の物理的な特徴を厳密に解析してください。
+                        背景色（ピンクや赤のモヤ）は「ノイズ」として完全に無視し、**「輪郭のはっきりした濃い物体」**だけを見てください。
 
-                        【思考プロセス】
+                        【Step 1: 色彩強度解析】
+                        画像の中で最も「色が濃く、輪郭がはっきりしている粒子」を探してください。
+                        * その粒子は **黒・濃い紫・濃紺** ですか？ → はいの場合: **Gram Positive (陽性)** で確定。
+                          (※背景がどれだけ赤くても、主役の粒子が黒ければ陽性です)
+                        * その粒子は **赤・ピンク・薄い赤** だけですか？ → はいの場合: **Gram Negative (陰性)** です。
 
-                        1. **色の確認（絶対基準）**:
-                           * 菌体の色は **赤/ピンク** ですか？ それとも **紫/青** ですか？
-                           * 赤/ピンクなら → 絶対に **グラム陰性 (Gram-Negative)** です。
-                             * 注意: 赤い Corynebacterium や 赤い Staphylococcus は存在しません。
-                           * 紫/青なら → **グラム陽性 (Gram-Positive)** です。
-
-                        2. **個々の形の確認**:
-                           * **球菌 (Cocci)**: 完全な丸、または少し尖った丸。
-                           * **桿菌 (Rods)**: 細長い棒状。短くても側面が平行なら桿菌です。
-                             * 重要: Corynebacterium は「不規則な棒状（こん棒状）」であり、丸（Cocci）ではありません。
-
-                        3. **矛盾チェック（自己添削）**:
-                           * 「GNR（赤色）なのに Corynebacterium（陽性菌）と判断していないか？」→ 赤ならGNRです。
-                           * 「棒状（Rod）なのに GPC（球菌）と判断していないか？」→ 棒状ならGPRかGNRです。
-
-                        4. **最終診断**:
-                           * 赤色 + 桿菌 → **GNR**
-                           * 紫色 + 丸い + クラスター → **Staphylococcus**
-                           * 紫色 + 少し尖った丸 + 双球菌 → **Streptococcus**
-                           * 紫色 + 不規則な棒状 + V字/柵状 → **Corynebacterium**
-                           * 紫色 + 太い棒状 → **Bacillus / Clostridium**
-
-                        【出力フォーマット】
-                        1. **観察所見**:
-                           * 色: [赤/ピンク または 紫/青]
-                           * 形: [球菌 または 桿菌]
-                           * 配列: [クラスター/連鎖/散在/V字など]
+                        【Step 2: 幾何学形状解析】
+                        検出した粒子を1つ拡大して見てください。
+                        * **アスペクト比（縦横比）の測定**:
+                          * 縦と横の長さがほぼ同じ（1:1〜1:1.2）の「真円」ですか？ → **Cocci (球菌)**
+                          * 少しでも縦に長い（1:1.5以上）、または楕円、こん棒状、長方形ですか？ → **Rods (桿菌)**
                         
-                        2. **論理的推論**:
-                           * 「色が〇〇であり、形が〇〇であるため、[菌種グループ]と考えられます。」
-                           * 否定根拠: 「色は似ているが、形が〇〇ではないため、xxではありません。」
+                        【Step 3: コリネバクテリウム判定の特別ルール】
+                        * 多くの細菌が「V字」や「文字のような並び」を形成していますか？
+                        * 粒子の一つ一つを見ると、片方が太く、片方が細い（涙型・こん棒状）ですか？
+                        * **重要**: もし「球菌か桿菌か迷う（少し長い気がする）」場合は、**必ず「桿菌 (Corynebacterium疑い)」**と判定してください。球菌は「完全な円」だけです。
 
-                        3. **最も近いカテゴリ**:
-                           リスト: [{categories_str}]
-                           ※確信度が高い順に。
+                        【Step 4: 最終出力】
+                        上記解析に基づき、以下の最も近いカテゴリを1つ選んでください。
+                        候補リスト: [{categories_str}]
+
+                        出力形式:
+                        1. **画像解析**:
+                           * ターゲット色: [黒紫 / 赤] (背景は無視)
+                           * 粒子形状: [真円 / 楕円・棒状]
+                           * 特徴: [V字配列 / クラスター / 連鎖 / 散在]
                         
-                        最後に必ず「CATEGORY:カテゴリ名」の形式で出力してください。
+                        2. **判定**:
+                           * 色判定: [GPC / GNR / GPR]
+                           * 理由: [形状と色の物理的特徴]
+
+                        最後に必ず「CATEGORY:カテゴリ名」を出力。
                         """
                         
                         safety_settings = {
