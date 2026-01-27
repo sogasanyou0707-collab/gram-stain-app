@@ -1,3 +1,4 @@
+
 import streamlit as st
 import google.generativeai as genai
 import requests
@@ -7,19 +8,23 @@ from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア ===
+# === 設定エリア（アプリっぽくする設定） ===
+# page_title: ホーム画面に追加する時の名前になります（短めがおすすめ）
+# page_icon: ブラウザタブのアイコンになります
 st.set_page_config(
     page_title="GramAI", 
     page_icon="🦠", 
     layout="centered",
-    initial_sidebar_state="expanded" 
+    initial_sidebar_state="collapsed"
 )
 
-# ★修正: headerを隠すとサイドバーボタンも消えるため、削除しました
+# --- CSSで見た目をアプリ風にする（余計な表示を消す） ---
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .stApp {margin-top: -80px;}
             </style>
             """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
@@ -35,10 +40,8 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定 (最新版優先ソート) ---
+# --- モデル設定 ---
 model_options = []
-default_models = ["gemini-1.5-pro-latest", "gemini-1.5-flash", "gemini-1.5-pro"]
-
 if api_key:
     try:
         genai.configure(api_key=api_key)
@@ -47,24 +50,18 @@ if api_key:
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
-        
-        # 名前で降順ソート（新しい数字が大きいものが上に来るように）
-        if all_models:
-            model_options = sorted(all_models, reverse=True)
-        else:
-            model_options = default_models
+        flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
+        other_models = sorted([m for m in all_models if "flash" not in m.lower()], reverse=True)
+        model_options = flash_models + other_models
     except:
-        model_options = default_models
+        model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
+
+# サイドバー（隠しておく設定にしましたが、左上の矢印で出せます）
+st.sidebar.header("🤖 設定")
+if model_options:
+    selected_model_name = st.sidebar.selectbox("モデル", model_options, index=0)
 else:
-    model_options = default_models
-
-# ★改善: サイドバーが開かない場合のために、メイン画面にも配置（Expander）
-with st.expander("🤖 モデル選択・設定", expanded=True):
-    selected_model_name = st.selectbox("使用モデル", model_options, index=0)
-
-# サイドバーにも同じものを配置（同期はしないが確認用）
-st.sidebar.header("設定")
-st.sidebar.write(f"選択中: {selected_model_name}")
+    selected_model_name = "gemini-1.5-flash"
 
 # --- ライブラリ取得 ---
 @st.cache_data(ttl=60)
@@ -79,23 +76,21 @@ def fetch_categories_from_drive():
         pass
     return []
 
-# フォルダ情報の取得
-valid_categories = []
-raw_list = fetch_categories_from_drive()
-valid_categories = [
-    c for c in raw_list 
-    if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
-    and not c.startswith(".")
-]
-
-# サイドバーにフォルダ表示
+# フォルダ確認（サイドバーへ移動）
 with st.sidebar:
     st.markdown("---")
     st.markdown("### 📂 認識中のフォルダ")
-    if len(valid_categories) == 0:
-        st.warning("フォルダなし")
-    else:
-        st.write(valid_categories)
+    with st.spinner('Loading...'):
+        raw_list = fetch_categories_from_drive()
+        valid_categories = [
+            c for c in raw_list 
+            if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
+            and not c.startswith(".")
+        ]
+        if len(valid_categories) == 0:
+            st.warning("フォルダなし")
+        else:
+            st.write(valid_categories)
 
 # --- メイン処理 ---
 if api_key:
@@ -110,50 +105,62 @@ if api_key:
         image = Image.open(uploaded_file)
         st.image(image, caption='解析対象', use_container_width=True)
 
-        if st.button("AIで解析する", use_container_width=True):
+        if st.button("AIで解析する", use_container_width=True): # ボタンを大きく
             if len(valid_categories) == 0:
                 st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # プロンプト (物理的特徴解析版)
+                        # ★プロンプト（指定されたバージョン）
                         prompt = f"""
-                        あなたは画像解析アルゴリズムです。医学的な推測をする前に、画像の物理的な特徴を厳密に解析してください。
-                        背景色（ピンクや赤のモヤ）は「ノイズ」として完全に無視し、**「輪郭のはっきりした濃い物体」**だけを見てください。
+                        あなたは臨床微生物学の専門家です。以下の精密な基準で診断してください。
 
-                        【Step 1: 色彩強度解析】
-                        画像の中で最も「色が濃く、輪郭がはっきりしている粒子」を探してください。
-                        * その粒子は **黒・濃い紫・濃紺** ですか？ → はいの場合: **Gram Positive (陽性)** で確定。
-                          (※背景がどれだけ赤くても、主役の粒子が黒ければ陽性です)
-                        * その粒子は **赤・ピンク・薄い赤** だけですか？ → はいの場合: **Gram Negative (陰性)** です。
-
-                        【Step 2: 幾何学形状解析】
-                        検出した粒子を1つ拡大して見てください。
-                        * **アスペクト比（縦横比）の測定**:
-                          * 縦と横の長さがほぼ同じ（1:1〜1:1.2）の「真円」ですか？ → **Cocci (球菌)**
-                          * 少しでも縦に長い（1:1.5以上）、または楕円、こん棒状、長方形ですか？ → **Rods (桿菌)**
+                        【STEP 1: 色の判定 (修正版)】
                         
-                        【Step 3: コリネバクテリウム判定の特別ルール】
-                        * 多くの細菌が「V字」や「文字のような並び」を形成していますか？
-                        * 粒子の一つ一つを見ると、片方が太く、片方が細い（涙型・こん棒状）ですか？
-                        * **重要**: もし「球菌か桿菌か迷う（少し長い気がする）」場合は、**必ず「桿菌 (Corynebacterium疑い)」**と判定してください。球菌は「完全な円」だけです。
-
-                        【Step 4: 最終出力】
-                        上記解析に基づき、以下の最も近いカテゴリを1つ選んでください。
-                        候補リスト: [{categories_str}]
-
-                        出力形式:
-                        1. **画像解析**:
-                           * ターゲット色: [黒紫 / 赤] (背景は無視)
-                           * 粒子形状: [真円 / 楕円・棒状]
-                           * 特徴: [V字配列 / クラスター / 連鎖 / 散在]
+                        * **A. グラム陽性 (G+)**:
+                          * **色**: 紫色、濃青色、黒色。
+                          * **特例**: 菌体が非常に濃い黒紫色であれば、背景がピンクでも、あるいは菌の一部が脱色して赤っぽくなっていても、**基本は「陽性」**と判定してください。(Gram-variable Bacillusの考慮)
                         
-                        2. **判定**:
-                           * 色判定: [GPC / GNR / GPR]
-                           * 理由: [形状と色の物理的特徴]
+                        * **B. グラム陰性 (G-)**:
+                          * **色**: 明るい赤色、ピンク色。
+                          * **条件**: 菌全体が均一に赤く染まっていること。
 
-                        最後に必ず「CATEGORY:カテゴリ名」を出力。
+                        【STEP 2: 形態鑑別 (大型桿菌ルール)】
+                        
+                        1. **Bacillus / Clostridium (Large GPR)**:
+                           * **特徴**: 非常に太く、大きい桿菌 (Box-car shape)。
+                           * **判定**: この形状が見えたら、多少色が赤っぽくても **GPR** と診断してください。(古い培養菌は陰性に見えることがあるため)
+
+                        2. **Staphylococcus (GPC)**:
+                           * **特徴**: 正円形、クラスター。
+
+                        3. **Streptococcus (GPC)**:
+                           * **特徴**: 楕円・ランセット状、連鎖、双球菌。
+
+                        4. **GNR (Gram-Negative Rods)**:
+                           * **特徴**: 陽性桿菌に比べて細い、小さい。全体がピンク色。
+                           * **注意**: 赤紫色で短い球桿菌はGNR。
+
+                        【STEP 3: 最終診断】
+                        * 「黒紫色」で「太い棒状」 → **GPR (Bacillus/Clostridium)**
+                        * 「ピンク色」で「細い棒状」 → **GNR**
+                        * 「紫色」で「正円クラスター」 → **Staphylococcus**
+                        * 「紫色」で「ランセット状双球菌」 → **Streptococcus**
+
+                        【出力フォーマット】
+                        1. **所見**:
+                           （色、サイズ[太い/細い]、形状）
+                        
+                        2. **鑑別診断**:
+                           * **検出菌**: [菌種名]
+                             理由: [色とサイズに基づき論理的に]
+
+                        3. **最も近いカテゴリ**:
+                           リスト: [{categories_str}]
+                           ※複数ある場合はカンマ区切り。
+                        
+                        最後に必ず「CATEGORY:カテゴリ名」の形式で出力してください。
                         """
                         
                         safety_settings = {
