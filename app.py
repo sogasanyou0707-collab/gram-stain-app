@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="GramAI", 
     page_icon="🦠", 
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded" # サイドバーを開いた状態で開始
 )
 
 # スタイル調整
@@ -37,7 +37,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定 (Flash優先 + 最新Pro指定) ---
+# --- モデル設定 (バージョン番号順にソート) ---
 model_options = []
 if api_key:
     try:
@@ -48,24 +48,18 @@ if api_key:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
         
-        # Flash系（動作安定・高速）
-        flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
-        
-        # Pro系（最新版 gemini-1.5-pro-latest を優先的に探す）
-        pro_latest = [m for m in all_models if "gemini-1.5-pro-latest" in m]
-        pro_others = sorted([m for m in all_models if "pro" in m.lower() and "latest" not in m], reverse=True)
-        pro_models = pro_latest + pro_others
-
-        # ★デフォルトはFlash（エラー回避）。Proはリストの後ろに追加。
-        model_options = flash_models + pro_models
+        # 名前で降順ソート（例: gemini-3.0 -> gemini-2.0 -> gemini-1.5）
+        # これにより、数字が大きい最新モデルが先頭に来ます
+        model_options = sorted(all_models, reverse=True)
     except:
-        # APIエラー時のフォールバック
-        model_options = ["gemini-1.5-flash", "gemini-1.5-pro-latest"]
+        # エラー時のフォールバック
+        model_options = ["gemini-1.5-pro-latest", "gemini-1.5-flash"]
 
-st.sidebar.header("🤖 使用モデル")
+# サイドバー（復活）
+st.sidebar.header("🤖 モデル選択")
 if model_options:
-    # デフォルトをFlashにする（リストの先頭）
-    selected_model_name = st.sidebar.selectbox("モデルを選択", model_options, index=0)
+    # リストの先頭（最新モデル）をデフォルトにする
+    selected_model_name = st.sidebar.selectbox("使用するAIモデル", model_options, index=0)
 else:
     selected_model_name = "gemini-1.5-flash"
 
@@ -82,7 +76,7 @@ def fetch_categories_from_drive():
         pass
     return []
 
-# サイドバー
+# サイドバー: フォルダ情報
 with st.sidebar:
     st.markdown("---")
     st.markdown("### 📂 認識中のフォルダ")
@@ -118,7 +112,7 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★プロンプト（物理的特徴解析版を維持）
+                        # プロンプト (物理的特徴解析版)
                         prompt = f"""
                         あなたは画像解析アルゴリズムです。医学的な推測をする前に、画像の物理的な特徴を厳密に解析してください。
                         背景色（ピンクや赤のモヤ）は「ノイズ」として完全に無視し、**「輪郭のはっきりした濃い物体」**だけを見てください。
@@ -182,49 +176,3 @@ if api_key:
                 if "CATEGORY:" in line:
                     cats_str = line.split("CATEGORY:")[1].strip()
                     cats_str = cats_str.replace("、", ",")
-                    match_categories = [c.strip() for c in cats_str.split(',')]
-            
-            if match_categories:
-                st.markdown("---")
-                st.markdown("#### 📚 参考画像ライブラリー")
-                cols = st.columns(len(match_categories))
-                
-                for i, category in enumerate(match_categories):
-                    if category in valid_categories and category != "None":
-                        if GAS_APP_URL:
-                            with cols[i]:
-                                with st.spinner(f"取得中: {category}..."):
-                                    try:
-                                        res = requests.get(GAS_APP_URL, params={"action": "get_image", "category": category}, timeout=15)
-                                        data = res.json()
-                                        if data.get("found"):
-                                            img_data = base64.b64decode(data["image"])
-                                            ref_image = Image.open(io.BytesIO(img_data))
-                                            st.image(ref_image, caption=f'{category}', use_container_width=True)
-                                        else:
-                                            st.caption(f"※{category}: 画像なし")
-                                    except:
-                                        st.caption(f"※{category}: エラー")
-
-            st.write("---")
-            if st.button("☁️ Googleドライブに保存", use_container_width=True):
-                if GAS_APP_URL and DRIVE_FOLDER_ID:
-                    with st.spinner("保存中..."):
-                        try:
-                            img_byte_arr = io.BytesIO()
-                            st.session_state['last_image'].save(img_byte_arr, format='PNG')
-                            img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            payload = {
-                                'image': img_base64,
-                                'filename': f"{timestamp}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            }
-                            res = requests.post(GAS_APP_URL, json=payload)
-                            if res.status_code == 200 and res.json().get('status') == 'success':
-                                st.success(f"✅ 保存成功")
-                            else:
-                                st.error("保存失敗")
-                        except Exception as e:
-                            st.error(f"エラー: {e}")
