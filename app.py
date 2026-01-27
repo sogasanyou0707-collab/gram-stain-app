@@ -7,9 +7,7 @@ from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア（アプリっぽくする設定） ===
-# page_title: ホーム画面に追加する時の名前になります（短めがおすすめ）
-# page_icon: ブラウザタブのアイコンになります
+# === 設定エリア ===
 st.set_page_config(
     page_title="GramAI", 
     page_icon="🦠", 
@@ -17,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- CSSで見た目をアプリ風にする（余計な表示を消す） ---
+# スタイル調整
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -40,6 +38,7 @@ GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
 # --- モデル設定 ---
+# あえて flash ではなく pro を優先する（推論能力重視のため）
 model_options = []
 if api_key:
     try:
@@ -49,18 +48,18 @@ if api_key:
             if 'generateContent' in m.supported_generation_methods:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
+        # proを先頭に
+        pro_models = sorted([m for m in all_models if "pro" in m.lower()], reverse=True)
         flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
-        other_models = sorted([m for m in all_models if "flash" not in m.lower()], reverse=True)
-        model_options = flash_models + other_models
+        model_options = pro_models + flash_models
     except:
-        model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
+        model_options = ["gemini-1.5-pro", "gemini-1.5-flash"]
 
-# サイドバー（隠しておく設定にしましたが、左上の矢印で出せます）
 st.sidebar.header("🤖 設定")
 if model_options:
     selected_model_name = st.sidebar.selectbox("モデル", model_options, index=0)
 else:
-    selected_model_name = "gemini-1.5-flash"
+    selected_model_name = "gemini-1.5-pro"
 
 # --- ライブラリ取得 ---
 @st.cache_data(ttl=60)
@@ -75,7 +74,7 @@ def fetch_categories_from_drive():
         pass
     return []
 
-# フォルダ確認（サイドバーへ移動）
+# サイドバー
 with st.sidebar:
     st.markdown("---")
     st.markdown("### 📂 認識中のフォルダ")
@@ -96,7 +95,7 @@ if api_key:
     try:
         model = genai.GenerativeModel(selected_model_name)
     except:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-pro")
 
     uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
@@ -104,60 +103,56 @@ if api_key:
         image = Image.open(uploaded_file)
         st.image(image, caption='解析対象', use_container_width=True)
 
-        if st.button("AIで解析する", use_container_width=True): # ボタンを大きく
+        if st.button("AIで解析する", use_container_width=True):
             if len(valid_categories) == 0:
                 st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★プロンプト（ver10.15の内容を維持）
+                        # ★ここを大幅変更：思考プロセスを強制するプロンプト
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の精密な基準で診断してください。
+                        あなたは臨床微生物学の専門家です。
+                        画像を見て、以下の【思考プロセス】の手順通りに観察を行い、論理的に診断してください。
+                        いきなり結論を出さず、必ずステップごとに確認してください。
 
-                        【STEP 1: 色の判定 (修正版)】
-                        
-                        * **A. グラム陽性 (G+)**:
-                          * **色**: 紫色、濃青色、黒色。
-                          * **特例**: 菌体が非常に濃い黒紫色であれば、背景がピンクでも、あるいは菌の一部が脱色して赤っぽくなっていても、**基本は「陽性」**と判定してください。(Gram-variable Bacillusの考慮)
-                        
-                        * **B. グラム陰性 (G-)**:
-                          * **色**: 明るい赤色、ピンク色。
-                          * **条件**: 菌全体が均一に赤く染まっていること。
+                        【思考プロセス】
 
-                        【STEP 2: 形態鑑別 (大型桿菌ルール)】
-                        
-                        1. **Bacillus / Clostridium (Large GPR)**:
-                           * **特徴**: 非常に太く、大きい桿菌 (Box-car shape)。
-                           * **判定**: この形状が見えたら、多少色が赤っぽくても **GPR** と診断してください。(古い培養菌は陰性に見えることがあるため)
+                        1. **色の確認（絶対基準）**:
+                           * 菌体の色は **赤/ピンク** ですか？ それとも **紫/青** ですか？
+                           * 赤/ピンクなら → 絶対に **グラム陰性 (Gram-Negative)** です。
+                             * 注意: 赤い Corynebacterium や 赤い Staphylococcus は存在しません。
+                           * 紫/青なら → **グラム陽性 (Gram-Positive)** です。
 
-                        2. **Staphylococcus (GPC)**:
-                           * **特徴**: 正円形、クラスター。
+                        2. **個々の形の確認**:
+                           * **球菌 (Cocci)**: 完全な丸、または少し尖った丸。
+                           * **桿菌 (Rods)**: 細長い棒状。短くても側面が平行なら桿菌です。
+                             * 重要: Corynebacterium は「不規則な棒状（こん棒状）」であり、丸（Cocci）ではありません。
 
-                        3. **Streptococcus (GPC)**:
-                           * **特徴**: 楕円・ランセット状、連鎖、双球菌。
+                        3. **矛盾チェック（自己添削）**:
+                           * 「GNR（赤色）なのに Corynebacterium（陽性菌）と判断していないか？」→ 赤ならGNRです。
+                           * 「棒状（Rod）なのに GPC（球菌）と判断していないか？」→ 棒状ならGPRかGNRです。
 
-                        4. **GNR (Gram-Negative Rods)**:
-                           * **特徴**: 陽性桿菌に比べて細い、小さい。全体がピンク色。
-                           * **注意**: 赤紫色で短い球桿菌はGNR。
-
-                        【STEP 3: 最終診断】
-                        * 「黒紫色」で「太い棒状」 → **GPR (Bacillus/Clostridium)**
-                        * 「ピンク色」で「細い棒状」 → **GNR**
-                        * 「紫色」で「正円クラスター」 → **Staphylococcus**
-                        * 「紫色」で「ランセット状双球菌」 → **Streptococcus**
+                        4. **最終診断**:
+                           * 赤色 + 桿菌 → **GNR**
+                           * 紫色 + 丸い + クラスター → **Staphylococcus**
+                           * 紫色 + 少し尖った丸 + 双球菌 → **Streptococcus**
+                           * 紫色 + 不規則な棒状 + V字/柵状 → **Corynebacterium**
+                           * 紫色 + 太い棒状 → **Bacillus / Clostridium**
 
                         【出力フォーマット】
-                        1. **所見**:
-                           （色、サイズ[太い/細い]、形状）
+                        1. **観察所見**:
+                           * 色: [赤/ピンク または 紫/青]
+                           * 形: [球菌 または 桿菌]
+                           * 配列: [クラスター/連鎖/散在/V字など]
                         
-                        2. **鑑別診断**:
-                           * **検出菌**: [菌種名]
-                             理由: [色とサイズに基づき論理的に]
+                        2. **論理的推論**:
+                           * 「色が〇〇であり、形が〇〇であるため、[菌種グループ]と考えられます。」
+                           * 否定根拠: 「色は似ているが、形が〇〇ではないため、xxではありません。」
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
-                           ※複数ある場合はカンマ区切り。
+                           ※確信度が高い順に。
                         
                         最後に必ず「CATEGORY:カテゴリ名」の形式で出力してください。
                         """
