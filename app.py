@@ -7,9 +7,28 @@ from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア ===
-st.set_page_config(page_title="グラム染色AI ver10.15 (Final)", page_icon="🔬")
-st.title("🔬 グラム染色AI (最終調整版)")
+# === 設定エリア（アプリっぽくする設定） ===
+# page_title: ホーム画面に追加する時の名前になります（短めがおすすめ）
+# page_icon: ブラウザタブのアイコンになります
+st.set_page_config(
+    page_title="GramAI", 
+    page_icon="🦠", 
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# --- CSSで見た目をアプリ風にする（余計な表示を消す） ---
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            .stApp {margin-top: -80px;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+st.title("🔬 グラム染色 AI")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -36,9 +55,10 @@ if api_key:
     except:
         model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
 
-st.sidebar.header("🤖 使用モデル")
+# サイドバー（隠しておく設定にしましたが、左上の矢印で出せます）
+st.sidebar.header("🤖 設定")
 if model_options:
-    selected_model_name = st.sidebar.selectbox("モデルを選択", model_options, index=0)
+    selected_model_name = st.sidebar.selectbox("モデル", model_options, index=0)
 else:
     selected_model_name = "gemini-1.5-flash"
 
@@ -55,19 +75,21 @@ def fetch_categories_from_drive():
         pass
     return []
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📂 認識中のフォルダ")
-with st.spinner('Loading...'):
-    raw_list = fetch_categories_from_drive()
-    valid_categories = [
-        c for c in raw_list 
-        if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
-        and not c.startswith(".")
-    ]
-    if len(valid_categories) == 0:
-        st.sidebar.warning("菌フォルダが見つかりません")
-    else:
-        st.sidebar.write(valid_categories)
+# フォルダ確認（サイドバーへ移動）
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 📂 認識中のフォルダ")
+    with st.spinner('Loading...'):
+        raw_list = fetch_categories_from_drive()
+        valid_categories = [
+            c for c in raw_list 
+            if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
+            and not c.startswith(".")
+        ]
+        if len(valid_categories) == 0:
+            st.warning("フォルダなし")
+        else:
+            st.write(valid_categories)
 
 # --- メイン処理 ---
 if api_key:
@@ -82,14 +104,14 @@ if api_key:
         image = Image.open(uploaded_file)
         st.image(image, caption='解析対象', use_container_width=True)
 
-        if st.button("AIで解析する"):
+        if st.button("AIで解析する", use_container_width=True): # ボタンを大きく
             if len(valid_categories) == 0:
                 st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★修正ポイント：大型桿菌の保護と、赤紫ルールの緩和
+                        # ★プロンプト（ver10.15の内容を維持）
                         prompt = f"""
                         あなたは臨床微生物学の専門家です。以下の精密な基準で診断してください。
 
@@ -190,7 +212,7 @@ if api_key:
                                         st.caption(f"※{category}: エラー")
 
             st.write("---")
-            if st.button("☁️ Googleドライブに保存"):
+            if st.button("☁️ Googleドライブに保存", use_container_width=True):
                 if GAS_APP_URL and DRIVE_FOLDER_ID:
                     with st.spinner("保存中..."):
                         try:
