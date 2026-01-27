@@ -37,7 +37,7 @@ else:
 GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
-# --- モデル設定 (Flash優先 + 最新Pro指定) ---
+# --- モデル設定 (デフォルト: Flash) ---
 model_options = []
 if api_key:
     try:
@@ -48,23 +48,21 @@ if api_key:
                 name = m.name.replace("models/", "")
                 all_models.append(name)
         
-        # Flash系（動作安定・高速）
+        # Flash系
         flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
         
-        # Pro系（最新版 gemini-1.5-pro-latest を優先的に探す）
+        # Pro系 (最新版)
         pro_latest = [m for m in all_models if "gemini-1.5-pro-latest" in m]
         pro_others = sorted([m for m in all_models if "pro" in m.lower() and "latest" not in m], reverse=True)
         pro_models = pro_latest + pro_others
 
-        # ★デフォルトはFlash（エラー回避）。Proはリストの後ろに追加。
+        # デフォルトはFlash
         model_options = flash_models + pro_models
     except:
-        # APIエラー時のフォールバック
         model_options = ["gemini-1.5-flash", "gemini-1.5-pro-latest"]
 
 st.sidebar.header("🤖 使用モデル")
 if model_options:
-    # デフォルトをFlashにする（リストの先頭）
     selected_model_name = st.sidebar.selectbox("モデルを選択", model_options, index=0)
 else:
     selected_model_name = "gemini-1.5-flash"
@@ -118,7 +116,7 @@ if api_key:
                 categories_str = ", ".join(valid_categories)
                 with st.spinner(f'AI ({selected_model_name}) が解析中...'):
                     try:
-                        # ★プロンプト（物理的特徴解析版を維持）
+                        # プロンプト (物理的特徴解析版)
                         prompt = f"""
                         あなたは画像解析アルゴリズムです。医学的な推測をする前に、画像の物理的な特徴を厳密に解析してください。
                         背景色（ピンクや赤のモヤ）は「ノイズ」として完全に無視し、**「輪郭のはっきりした濃い物体」**だけを見てください。
