@@ -8,7 +8,7 @@ from PIL import Image, ImageFilter
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア (ワイドモード) ===
+# === 設定エリア ===
 st.set_page_config(
     page_title="GramAI", 
     page_icon="🦠", 
@@ -23,7 +23,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (Self-Learning Ver)")
+st.title("🔬 グラム染色 AI (v10.41: 背景誤認対策)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -58,27 +58,24 @@ with st.sidebar:
     if not api_key:
         api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("Logic: ユーザーフィードバック学習型")
+    st.info("Logic: 背景ピンク除外 & 学習型")
 
     # --- 学習機能エリア ---
     st.markdown("---")
     st.markdown("### 🧠 AIへの教育")
-    st.caption("AIが間違えた時、ここに教訓を書き込んで「学習させる」を押すと、次回からそのルールを守るようになります。")
+    st.caption("「背景のピンクを菌と間違えるな」などのルールは、ここに書いて保存してください。")
     
     current_rules = load_rules()
     with st.expander("現在の学習済みルールを見る"):
-        if current_rules:
-            st.text(current_rules)
-        else:
-            st.write("まだ学習データはありません。")
+        st.text(current_rules if current_rules else "まだ学習データはありません。")
 
-    new_feedback = st.text_area("新しいルールを追加", placeholder="例: ピンク色でもアスペクト比2.0以上ならグラム陰性桿菌と判定せよ")
+    new_feedback = st.text_area("新しいルールを追加", placeholder="例: ピンク色でも輪郭がボヤけていたら背景のゴミとみなす")
     
     if st.button("学習させる (ルール保存)"):
         if new_feedback:
             save_rule(new_feedback)
-            st.success("AIに学習させました！次回の解析から反映されます。")
-            st.rerun() # 画面更新
+            st.success("ルールを保存しました！次回から適用されます。")
+            st.rerun()
 
     # --- フォルダ情報 ---
     @st.cache_data(ttl=60)
@@ -121,11 +118,7 @@ if api_key:
 
             st.markdown("### 🔍 画像確認")
             img_display_width = st.slider(
-                "表示サイズ調整", 
-                min_value=600, 
-                max_value=2500, 
-                value=1000, 
-                step=100
+                "表示サイズ調整", min_value=600, max_value=2500, value=1000, step=100
             )
             
             processed_image = process_image(raw_image, img_display_width)
@@ -135,57 +128,57 @@ if api_key:
             
             if st.button("AI解析開始 (学習データ適用)", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
-                
-                # 学習ルールを読み込む
                 learned_rules = load_rules()
                 
-                with st.spinner(f'過去の教訓を参照しつつ解析中...'):
+                with st.spinner(f'背景ノイズを除去し、学習ルールを適用中...'):
                     try:
+                        # ★背景誤認を防ぐための強化プロンプト
                         prompt = f"""
                         あなたは臨床微生物検査技師です。光学顕微鏡の1000倍視野画像を解析します。
 
-                        【重要：ユーザーからの学習/修正指示】
-                        過去にユーザーから以下の指摘を受けています。このルールを**最優先**で守ってください。
+                        【最重要ルール: ユーザー学習データ】
+                        以下の過去の指摘を絶対遵守してください:
                         {learned_rules}
                         --------------------------------------------------
 
-                        【観察手順: 自動選別】
-                        画像全体をスキャンし、**菌体が密集・凝集している場所は無視**してください。
-                        背景に**「孤立散在（ばらけている）」している菌**を探し、その部分を重点的に観察してください。
+                        【観察手順: 背景と菌の分離】
+                        画像全体をスキャンしますが、**「ピンク色の背景」に騙されないでください。**
+                        
+                        * **菌体**: 明確な「輪郭（エッジ）」があり、コントラストがはっきりしている。
+                        * **背景**: ピンク色だが、輪郭がボヤけている、雲のようなモヤ、不定形の粘液。
+                        * → **輪郭が不明瞭なピンク色はすべて「背景（ゴミ）」として無視**し、診断対象に入れないでください。
 
                         【診断ロジック】
-                        以下の手順①〜④に従って厳密に判定すること。
+                        以下の手順①〜④に従って判定すること。
 
-                        ① **グラム染色性**:
-                           * **グラム陽性 (G+)**: 青紫、紺色、濃い紫。
-                           * **グラム陰性 (G-)**: ピンク、赤、赤紫。
+                        ① **グラム染色性 (背景除外後)**:
+                           * **グラム陽性 (G+)**: 青紫、紺色。
+                           * **グラム陰性 (G-)**: 
+                             濃い赤〜ピンク。**ただし、明確な桿菌/球菌の形をしているものに限る。**
+                             形が定まらないピンクはG-ではない。
 
                         ② **形状判定 (アスペクト比とくびれ)**:
                            * **1.0 〜 1.5**: 球菌 (Cocci)
-                           * **1.5 以上 (重要)**: 
-                             **★必ず『くびれ』を確認してください★**
-                             * **くびれ有り**: 連結部が凹んでいる → **球菌の連鎖**と判定。
-                             * **くびれ無し**: 側面が平坦で直線的 → **桿菌 (Bacilli)** と判定。
+                           * **1.5 以上**: 
+                             **★くびれ確認★**: くびれ有=連鎖球菌、くびれ無=桿菌。
 
                         ③ **配列・集落パターン**:
-                           * **ブドウ球菌 (Staph)**: 立体的な「ブドウ房状」クラスター。
-                           * **連鎖球菌 (Strep)**: 2連(双球菌)または数珠状の連鎖が80％以上。
-                           * **その他**: 集落が不規則（いびつ）である場合は、球菌以外（コリネ等）を疑う。
+                           * **ブドウ球菌**: 立体的なクラスター。
+                           * **連鎖球菌**: 双球菌または連鎖が80％以上。
 
                         ④ **サイズ感 (1000倍視野)**:
-                           * **大型**: 赤血球(約7µm)の半径ほどある(3-5µm) → Bacillus/Clostridium等。
+                           * **大型**: 赤血球(約7µm)の半分〜同等(3-5µm) → Bacillus/Clostridium等。
                            * **小型**: 赤血球より遥かに小さい(約1µm) → 肺炎球菌、ブドウ球菌、コリネ等。
 
                         【出力フォーマット】
                         1. **観察所見**:
-                           * 染色性: [G+ / G-]
-                           * アスペクト比: [1.0-1.5 / 1.5以上]
-                           * くびれ: [有り / 無し / 対象外]
+                           * 染色性: [G+ / G-] (※背景のピンクは無視済み)
+                           * 形状: [球菌 / 桿菌]
                            * 配列: [ブドウ房 / 連鎖 / 不規則]
                            * サイズ: [大型 / 小型]
                         
                         2. **推論**:
-                           * 「アスペクト比は1.5以上ですが、くびれがあり、また過去の学習ルール『(該当すれば引用)』に基づき、[菌種]と判断します。」
+                           * 「背景のピンク色は粘液成分として除外しました。明確な輪郭を持つ菌体は〇〇であるため...」
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
@@ -240,11 +233,8 @@ if api_key:
                                             pass
                 
                 st.markdown("---")
-                # 正解データの保存機能（学習の第一歩）
                 st.markdown("### 💾 正解データの蓄積")
-                st.caption("もしAIが間違えていたら、正しい菌名を選んで保存してください。将来的な精度向上に使われます。")
-                
-                # ユーザーが正しい答えを選べるようにする
+                st.caption("AIの精度向上のため、正しい菌種を選んで保存してください。")
                 correct_label = st.selectbox("正しい菌種を選択", ["選択してください"] + valid_categories)
                 
                 if st.button("正解として保存する", use_container_width=True):
@@ -255,7 +245,6 @@ if api_key:
                                 st.session_state['last_image'].save(img_byte_arr, format='PNG')
                                 img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
                                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                # ファイル名に正解ラベルを含める
                                 payload = {
                                     'image': img_base64,
                                     'filename': f"CORRECT_{correct_label}_{timestamp}.png",
@@ -266,8 +255,6 @@ if api_key:
                                 st.success(f"✅ 「{correct_label}」の正解データとして保存しました。")
                             except:
                                 st.error("保存失敗")
-                    else:
-                        st.warning("正しい菌種を選択するか、保存設定を確認してください。")
 
         except Exception as e:
             st.error(f"画像エラー: {e}")
