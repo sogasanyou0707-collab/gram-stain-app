@@ -61,3 +61,4 @@ PyGithub
 google-api-python-client
 google-auth
 requests
+streamlit-cropper
