@@ -1,4 +1,3 @@
-
 import streamlit as st
 import google.generativeai as genai
 import requests
@@ -8,26 +7,27 @@ from PIL import Image
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア（アプリっぽくする設定） ===
-# page_title: ホーム画面に追加する時の名前になります（短めがおすすめ）
-# page_icon: ブラウザタブのアイコンになります
+# ★追加: 切り抜き用ライブラリ
+try:
+    from streamlit_cropper import st_cropper
+except ImportError:
+    # 万が一入っていない場合のフォールバック（エラーではなくメッセージを出す）
+    st.error("⚠️ ライブラリ 'streamlit-cropper' が見つかりません。requirements.txtを確認してください。")
+    st.stop()
+
+# === 設定エリア ===
 st.set_page_config(
     page_title="GramAI", 
     page_icon="🦠", 
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded" 
 )
 
-# --- CSSで見た目をアプリ風にする（余計な表示を消す） ---
-hide_streamlit_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stApp {margin-top: -80px;}
-            </style>
-            """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    .stApp {margin-top: -20px;}
+    </style>
+    """, unsafe_allow_html=True)
 
 st.title("🔬 グラム染色 AI")
 
@@ -41,56 +41,46 @@ GAS_APP_URL = st.secrets["GAS_APP_URL"] if "GAS_APP_URL" in st.secrets else None
 DRIVE_FOLDER_ID = st.secrets["DRIVE_FOLDER_ID"] if "DRIVE_FOLDER_ID" in st.secrets else None
 
 # --- モデル設定 ---
-model_options = []
+priority_models = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-pro-latest"]
+model_options = ["gemini-1.5-flash"]
+
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        all_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                name = m.name.replace("models/", "")
-                all_models.append(name)
-        flash_models = sorted([m for m in all_models if "flash" in m.lower()], reverse=True)
-        other_models = sorted([m for m in all_models if "flash" not in m.lower()], reverse=True)
-        model_options = flash_models + other_models
+        all_models = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        sorted_models = []
+        for p in priority_models:
+            if p in all_models: sorted_models.append(p)
+        for m in all_models:
+            if m not in sorted_models: sorted_models.append(m)
+        if sorted_models: model_options = sorted_models
     except:
-        model_options = ["gemini-1.5-flash", "gemini-1.5-pro"]
+        pass
 
-# サイドバー（隠しておく設定にしましたが、左上の矢印で出せます）
-st.sidebar.header("🤖 設定")
-if model_options:
-    selected_model_name = st.sidebar.selectbox("モデル", model_options, index=0)
-else:
-    selected_model_name = "gemini-1.5-flash"
+with st.expander("🤖 モデル選択・設定", expanded=False):
+    selected_model_name = st.selectbox("使用モデル", model_options, index=0)
 
 # --- ライブラリ取得 ---
 @st.cache_data(ttl=60)
 def fetch_categories_from_drive():
-    if not GAS_APP_URL:
-        return []
+    if not GAS_APP_URL: return []
     try:
         res = requests.get(GAS_APP_URL, params={"action": "list_categories"}, timeout=10)
-        if res.status_code == 200:
-            return res.json().get("categories", [])
+        return res.json().get("categories", []) if res.status_code == 200 else []
     except:
-        pass
-    return []
+        return []
 
-# フォルダ確認（サイドバーへ移動）
+valid_categories = [c for c in fetch_categories_from_drive() if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] and not c.startswith(".")]
+
 with st.sidebar:
+    st.header("設定")
+    st.write(f"選択中: {selected_model_name}")
     st.markdown("---")
-    st.markdown("### 📂 認識中のフォルダ")
-    with st.spinner('Loading...'):
-        raw_list = fetch_categories_from_drive()
-        valid_categories = [
-            c for c in raw_list 
-            if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] 
-            and not c.startswith(".")
-        ]
-        if len(valid_categories) == 0:
-            st.warning("フォルダなし")
-        else:
-            st.write(valid_categories)
+    if len(valid_categories) == 0:
+        st.warning("フォルダなし")
+    else:
+        st.write(valid_categories)
 
 # --- メイン処理 ---
 if api_key:
@@ -102,65 +92,72 @@ if api_key:
     uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption='解析対象', use_container_width=True)
+        original_image = Image.open(uploaded_file)
+        
+        # ★新機能: 画像切り抜きツール
+        st.markdown("### ✂️ 解析エリアの指定")
+        st.info("画像の四隅をドラッグして、**「菌が綺麗に見えている場所」**だけを囲ってください。")
+        
+        # 切り抜き実行
+        cropped_image = st_cropper(
+            original_image,
+            realtime_update=True,
+            box_color='#FF0000', # 赤い枠
+            aspect_ratio=None    # 自由な形
+        )
 
-        if st.button("AIで解析する", use_container_width=True): # ボタンを大きく
+        st.markdown("---")
+        st.markdown("### 🔍 解析プレビュー")
+        st.image(cropped_image, caption="AIはこの画像だけを見て診断します", use_container_width=True)
+
+        if st.button("このエリアを解析する", use_container_width=True):
             if len(valid_categories) == 0:
                 st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
-                with st.spinner(f'AI ({selected_model_name}) が解析中...'):
+                with st.spinner(f'AI ({selected_model_name}) が指定エリアを集中解析中...'):
                     try:
-                        # ★プロンプト（指定されたバージョン）
+                        # プロンプト (切り抜き画像用)
                         prompt = f"""
-                        あなたは臨床微生物学の専門家です。以下の精密な基準で診断してください。
+                        あなたは臨床微生物検査技師です。
+                        提供された画像は、顕微鏡視野の中から**「最も観察に適した部分」を選んで切り抜いたもの**です。
+                        画像内の細菌の特徴を詳細に分析し、菌種を推定してください。
 
-                        【STEP 1: 色の判定 (修正版)】
+                        【観察手順】
+                        1. **菌の形状**:
+                           * 完全な「球（真円）」か？
+                           * 少し伸びた「卵型/ランセット状」か？
+                           * 明らかな「棒状（桿菌）」か？
                         
-                        * **A. グラム陽性 (G+)**:
-                          * **色**: 紫色、濃青色、黒色。
-                          * **特例**: 菌体が非常に濃い黒紫色であれば、背景がピンクでも、あるいは菌の一部が脱色して赤っぽくなっていても、**基本は「陽性」**と判定してください。(Gram-variable Bacillusの考慮)
-                        
-                        * **B. グラム陰性 (G-)**:
-                          * **色**: 明るい赤色、ピンク色。
-                          * **条件**: 菌全体が均一に赤く染まっていること。
+                        2. **菌の配列**:
+                           * 双球菌（ペア）か？
+                           * 連鎖か？
+                           * クラスター（塊）か？
+                           * 柵状・V字か？
 
-                        【STEP 2: 形態鑑別 (大型桿菌ルール)】
-                        
-                        1. **Bacillus / Clostridium (Large GPR)**:
-                           * **特徴**: 非常に太く、大きい桿菌 (Box-car shape)。
-                           * **判定**: この形状が見えたら、多少色が赤っぽくても **GPR** と診断してください。(古い培養菌は陰性に見えることがあるため)
-
-                        2. **Staphylococcus (GPC)**:
-                           * **特徴**: 正円形、クラスター。
-
-                        3. **Streptococcus (GPC)**:
-                           * **特徴**: 楕円・ランセット状、連鎖、双球菌。
-
-                        4. **GNR (Gram-Negative Rods)**:
-                           * **特徴**: 陽性桿菌に比べて細い、小さい。全体がピンク色。
-                           * **注意**: 赤紫色で短い球桿菌はGNR。
-
-                        【STEP 3: 最終診断】
-                        * 「黒紫色」で「太い棒状」 → **GPR (Bacillus/Clostridium)**
-                        * 「ピンク色」で「細い棒状」 → **GNR**
-                        * 「紫色」で「正円クラスター」 → **Staphylococcus**
-                        * 「紫色」で「ランセット状双球菌」 → **Streptococcus**
+                        3. **診断ロジック**:
+                           * **肺炎球菌 (Strep. pneumoniae)**: 
+                             * 特徴: ランセット状（涙型）の双球菌。
+                             * 鑑別点: 桿菌と間違えやすいが、よく見ると「2つの尖った球」のセットである。
+                           * **コリネバクテリウム (Corynebacterium)**:
+                             * 特徴: 不規則な多形性を持つ桿菌。V字や柵状配列。
+                           * **ブドウ球菌 (Staphylococcus)**:
+                             * 特徴: 均一なサイズの真円。クラスター形成。
 
                         【出力フォーマット】
                         1. **所見**:
-                           （色、サイズ[太い/細い]、形状）
+                           * 色: [GPC / GNR]
+                           * 形: [真円 / 卵型 / 桿菌]
+                           * 配列: [双球菌 / 連鎖 / クラスター / V字]
                         
-                        2. **鑑別診断**:
-                           * **検出菌**: [菌種名]
-                             理由: [色とサイズに基づき論理的に]
+                        2. **推論**:
+                           * 「形状が〇〇で、配列が〇〇であるため、[菌種]が強く疑われます。」
+                           * ※肺炎球菌の場合は「桿菌のように見えるが、ランセット状双球菌の特徴がある」等と記述。
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
-                           ※複数ある場合はカンマ区切り。
-                        
-                        最後に必ず「CATEGORY:カテゴリ名」の形式で出力してください。
+
+                        最後に必ず「CATEGORY:カテゴリ名」を出力。
                         """
                         
                         safety_settings = {
@@ -169,12 +166,16 @@ if api_key:
                             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
                             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                         }
-                        response = model.generate_content([prompt, image], safety_settings=safety_settings)
+                        
+                        response = model.generate_content([prompt, cropped_image], safety_settings=safety_settings)
                         if response.text:
                             st.session_state['last_result'] = response.text
-                            st.session_state['last_image'] = image
+                            st.session_state['last_image'] = cropped_image # 保存用も切り抜き画像にする
                     except Exception as e:
-                        st.error(f"エラー: {e}")
+                        if "429" in str(e):
+                            st.error("⚠️ AIの利用制限にかかりました。")
+                        else:
+                            st.error(f"エラー: {e}")
 
         # --- 結果表示 ---
         if 'last_result' in st.session_state:
@@ -213,7 +214,7 @@ if api_key:
                                         st.caption(f"※{category}: エラー")
 
             st.write("---")
-            if st.button("☁️ Googleドライブに保存", use_container_width=True):
+            if st.button("☁️ Googleドライブに保存 (切り抜き画像を保存)", use_container_width=True):
                 if GAS_APP_URL and DRIVE_FOLDER_ID:
                     with st.spinner("保存中..."):
                         try:
@@ -223,7 +224,7 @@ if api_key:
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             payload = {
                                 'image': img_base64,
-                                'filename': f"{timestamp}.png",
+                                'filename': f"{timestamp}_crop.png",
                                 'folderId': DRIVE_FOLDER_ID,
                                 'mimeType': 'image/png'
                             }
@@ -234,3 +235,4 @@ if api_key:
                                 st.error("保存失敗")
                         except Exception as e:
                             st.error(f"エラー: {e}")
+
