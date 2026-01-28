@@ -3,15 +3,15 @@ import google.generativeai as genai
 import requests
 import io
 import base64
-from PIL import Image
+# ★追加: ImageFilterをインポート
+from PIL import Image, ImageFilter
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# ★追加: 切り抜き用ライブラリ
+# 切り抜き用ライブラリ確認
 try:
     from streamlit_cropper import st_cropper
 except ImportError:
-    # 万が一入っていない場合のフォールバック（エラーではなくメッセージを出す）
     st.error("⚠️ ライブラリ 'streamlit-cropper' が見つかりません。requirements.txtを確認してください。")
     st.stop()
 
@@ -29,7 +29,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI")
+st.title("🔬 グラム染色 AI (Sharp & Resize)")
 
 # --- Secrets ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -82,6 +82,19 @@ with st.sidebar:
     else:
         st.write(valid_categories)
 
+# ★追加: 画像のリサイズとシャープ化を行う関数
+def process_image(img, max_width=800):
+    # 1. リサイズ（横幅がmax_widthを超えていたら縮小）
+    if img.width > max_width:
+        ratio = max_width / img.width
+        new_height = int(img.height * ratio)
+        img = img.resize((max_width, new_height), Image.LANCZOS)
+    
+    # 2. シャープ化（輪郭強調）
+    # SHARPENフィルタを適用して輪郭をくっきりさせる
+    sharpened_img = img.filter(ImageFilter.SHARPEN)
+    return sharpened_img
+
 # --- メイン処理 ---
 if api_key:
     try:
@@ -92,67 +105,66 @@ if api_key:
     uploaded_file = st.file_uploader("写真を撮影 または 選択", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
-        original_image = Image.open(uploaded_file)
+        # 画像を開く
+        raw_image = Image.open(uploaded_file)
         
-        # ★新機能: 画像切り抜きツール
-        st.markdown("### ✂️ 解析エリアの指定")
-        st.info("画像の四隅をドラッグして、**「菌が綺麗に見えている場所」**だけを囲ってください。")
+        # ★ここでリサイズとシャープ化を適用
+        processed_image = process_image(raw_image)
+
+        st.markdown("### ✂️ 解析エリアの指定 (自動補正済み)")
+        st.info("画像は操作しやすいサイズに縮小され、輪郭がシャープに強調されています。四隅をドラッグして解析エリアを囲ってください。")
         
-        # 切り抜き実行
+        # 切り抜き実行（処理済みの画像を使用）
         cropped_image = st_cropper(
-            original_image,
+            processed_image,
             realtime_update=True,
-            box_color='#FF0000', # 赤い枠
-            aspect_ratio=None    # 自由な形
+            box_color='#FF0000',
+            aspect_ratio=None
         )
 
         st.markdown("---")
-        st.markdown("### 🔍 解析プレビュー")
-        st.image(cropped_image, caption="AIはこの画像だけを見て診断します", use_container_width=True)
+        st.markdown("### 🔍 解析プレビュー (シャープ化済み)")
+        st.image(cropped_image, caption="AIはこのくっきりした画像を見て診断します", use_container_width=True)
 
         if st.button("このエリアを解析する", use_container_width=True):
             if len(valid_categories) == 0:
                 st.error("比較用の菌フォルダがGoogleドライブにありません。")
             else:
                 categories_str = ", ".join(valid_categories)
-                with st.spinner(f'AI ({selected_model_name}) が指定エリアを集中解析中...'):
+                with st.spinner(f'AI ({selected_model_name}) が集中解析中...'):
                     try:
-                        # プロンプト (切り抜き画像用)
+                        # ★プロンプト (シャープ化前提の微細構造解析)
                         prompt = f"""
                         あなたは臨床微生物検査技師です。
-                        提供された画像は、顕微鏡視野の中から**「最も観察に適した部分」を選んで切り抜いたもの**です。
-                        画像内の細菌の特徴を詳細に分析し、菌種を推定してください。
+                        提供された画像は、**輪郭強調（シャープ化）処理済み**の顕微鏡写真から、最適な部分を切り抜いたものです。
+                        輪郭が強調されていることを前提に、菌の微細な構造を厳密に分析してください。
 
-                        【観察手順】
-                        1. **菌の形状**:
-                           * 完全な「球（真円）」か？
-                           * 少し伸びた「卵型/ランセット状」か？
-                           * 明らかな「棒状（桿菌）」か？
-                        
-                        2. **菌の配列**:
-                           * 双球菌（ペア）か？
-                           * 連鎖か？
-                           * クラスター（塊）か？
-                           * 柵状・V字か？
+                        【観察の重要ポイント】
+                        シャープ化により、菌体の境界線が明確になっています。「つながっているように見える部分」の境界をよく見てください。
 
-                        3. **診断ロジック**:
-                           * **肺炎球菌 (Strep. pneumoniae)**: 
-                             * 特徴: ランセット状（涙型）の双球菌。
-                             * 鑑別点: 桿菌と間違えやすいが、よく見ると「2つの尖った球」のセットである。
-                           * **コリネバクテリウム (Corynebacterium)**:
-                             * 特徴: 不規則な多形性を持つ桿菌。V字や柵状配列。
-                           * **ブドウ球菌 (Staphylococcus)**:
-                             * 特徴: 均一なサイズの真円。クラスター形成。
+                        1. **連鎖球菌 (Streptococcus) vs コリネバクテリウム (Corynebacterium)**:
+                           * **連鎖球菌**: 球菌がつながっているため、菌と菌の間に必ず**「くびれ（凹み）」**があります。シャープ化された画像では、このくびれが明確に見えるはずです。
+                           * **コリネバクテリウム**: 1本の棒状であるため、側面のラインは**「直線的で滑らか」**であり、深いくびれはありません。多少曲がっていても、球の連なりとは異なります。
+
+                        【診断ロジック】
+                        * **GPC連鎖**:
+                          * 色は紫。形は丸または卵型。「くびれ」のある連鎖が見える。
+                          * ※密集していても、個々の菌の輪郭が丸ければ球菌です。
+                        * **GPR (コリネ型)**:
+                          * 色は紫。形は不規則な棒状。側面が直線的で、くびれがない。V字配列などがある。
+                        * **肺炎球菌**:
+                          * 色は紫。ランセット状（尖った卵型）のペア。くびれは明瞭。
 
                         【出力フォーマット】
-                        1. **所見**:
+                        1. **所見 (微細構造)**:
                            * 色: [GPC / GNR]
-                           * 形: [真円 / 卵型 / 桿菌]
-                           * 配列: [双球菌 / 連鎖 / クラスター / V字]
+                           * 基本形状: [球菌 / 桿菌]
+                           * 境界部の特徴: [明確なくびれ有り / 直線的で滑らか]
+                           * 配列: [双球菌 / 連鎖 / クラスター / V字 / 柵状]
                         
                         2. **推論**:
-                           * 「形状が〇〇で、配列が〇〇であるため、[菌種]が強く疑われます。」
-                           * ※肺炎球菌の場合は「桿菌のように見えるが、ランセット状双球菌の特徴がある」等と記述。
+                           * 「形状が〇〇で、菌の連結部に明確な〇〇（くびれ等）が確認できるため、[菌種]と判断します。」
+                           * 否定根拠: 「一見〇〇に見えるが、〇〇という特徴がないため、それは否定されます。」
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
@@ -170,7 +182,7 @@ if api_key:
                         response = model.generate_content([prompt, cropped_image], safety_settings=safety_settings)
                         if response.text:
                             st.session_state['last_result'] = response.text
-                            st.session_state['last_image'] = cropped_image # 保存用も切り抜き画像にする
+                            st.session_state['last_image'] = cropped_image
                     except Exception as e:
                         if "429" in str(e):
                             st.error("⚠️ AIの利用制限にかかりました。")
@@ -224,7 +236,7 @@ if api_key:
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             payload = {
                                 'image': img_base64,
-                                'filename': f"{timestamp}_crop.png",
+                                'filename': f"{timestamp}_crop_sharp.png", # ファイル名にsharpを追加
                                 'folderId': DRIVE_FOLDER_ID,
                                 'mimeType': 'image/png'
                             }
