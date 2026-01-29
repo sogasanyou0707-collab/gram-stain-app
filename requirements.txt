@@ -1,5 +1,6 @@
 streamlit==1.29.0
 google-generativeai
+requests
 streamlit-drawable-canvas
 Pillow>=9.0.0
 numpy
