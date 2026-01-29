@@ -4,14 +4,15 @@ import requests
 import io
 import base64
 import os
-from PIL import Image, ImageFilter
+import numpy as np
+from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # === 設定エリア ===
 st.set_page_config(
     page_title="GramAI", 
-    page_icon="🦠", 
+    page_icon="🩸", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -20,10 +21,20 @@ st.markdown("""
     <style>
     .stApp {margin-top: -20px;}
     .stImage {overflow-x: auto;}
+    iframe {border: 1px solid #ddd;}
+    /* 警告ボックスのデザイン */
+    .warning-box {
+        padding: 15px;
+        background-color: #fff3cd;
+        border: 2px solid #ffc107;
+        border-radius: 5px;
+        color: #856404;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.41: 背景誤認対策)")
+st.title("🔬 グラム染色 AI (Blood Culture Mode)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -38,15 +49,12 @@ try:
 except Exception:
     pass
 
-# --- 学習ルールの読み書き関数 ---
+# --- 学習ルールの読み書き ---
 RULE_FILE = "learning_rules.txt"
-
 def load_rules():
     if os.path.exists(RULE_FILE):
-        with open(RULE_FILE, "r", encoding="utf-8") as f:
-            return f.read()
+        with open(RULE_FILE, "r", encoding="utf-8") as f: return f.read()
     return ""
-
 def save_rule(new_rule):
     with open(RULE_FILE, "a", encoding="utf-8") as f:
         timestamp = datetime.now().strftime("%Y/%m/%d")
@@ -58,26 +66,26 @@ with st.sidebar:
     if not api_key:
         api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("Logic: 背景ピンク除外 & 学習型")
+    st.info("Mode: 血液培養 (溶血・デブリ対応)")
+    
+    st.markdown("---")
+    st.markdown("### 📷 倍率設定")
+    st.caption("顕微鏡は1000倍固定とみなします。カメラのアダプター倍率を変更した場合は入力してください。")
+    # カメラ倍率の入力機能
+    camera_mag = st.number_input("カメラ倍率 (x)", value=1.0, step=0.1, min_value=0.1, max_value=10.0)
 
-    # --- 学習機能エリア ---
     st.markdown("---")
     st.markdown("### 🧠 AIへの教育")
-    st.caption("「背景のピンクを菌と間違えるな」などのルールは、ここに書いて保存してください。")
-    
     current_rules = load_rules()
-    with st.expander("現在の学習済みルールを見る"):
-        st.text(current_rules if current_rules else "まだ学習データはありません。")
-
-    new_feedback = st.text_area("新しいルールを追加", placeholder="例: ピンク色でも輪郭がボヤけていたら背景のゴミとみなす")
-    
-    if st.button("学習させる (ルール保存)"):
+    with st.expander("現在の学習済みルール"):
+        st.text(current_rules if current_rules else "データなし")
+    new_feedback = st.text_area("新しいルールを追加", placeholder="例: 嫌気ボトルの背景は無視せよ")
+    if st.button("学習させる"):
         if new_feedback:
             save_rule(new_feedback)
-            st.success("ルールを保存しました！次回から適用されます。")
+            st.success("保存しました！")
             st.rerun()
 
-    # --- フォルダ情報 ---
     @st.cache_data(ttl=60)
     def fetch_categories_from_drive():
         if not GAS_APP_URL: return []
@@ -86,12 +94,17 @@ with st.sidebar:
             return res.json().get("categories", []) if res.status_code == 200 else []
         except:
             return []
-
     valid_categories = [c for c in fetch_categories_from_drive() if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] and not c.startswith(".")]
-    
     if valid_categories:
         st.markdown("---")
-        st.write("📂 登録カテゴリ:", valid_categories)
+        st.write("📂 カテゴリ:", valid_categories)
+
+# --- キャンバスライブラリ ---
+try:
+    from streamlit_drawable_canvas import st_canvas
+except ImportError:
+    st.error("ライブラリ不足: pip install streamlit-drawable-canvas を実行してください")
+    st.stop()
 
 # --- 画像処理関数 ---
 def process_image(img, target_width):
@@ -115,70 +128,107 @@ if api_key:
     if uploaded_file is not None:
         try:
             raw_image = Image.open(uploaded_file)
-
-            st.markdown("### 🔍 画像確認")
-            img_display_width = st.slider(
-                "表示サイズ調整", min_value=600, max_value=2500, value=1000, step=100
-            )
             
-            processed_image = process_image(raw_image, img_display_width)
-            st.image(processed_image, caption="解析対象画像", use_container_width=True)
+            st.markdown("### 🖍️ 観察位置の指定")
+            st.info("マウスで**菌がいる場所を四角く囲んで**ください。")
+            
+            canvas_width = 800
+            processed_image = process_image(raw_image, canvas_width)
+            
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 0, 0, 0.1)",
+                stroke_width=3,
+                stroke_color="#FF0000",
+                background_image=processed_image,
+                update_streamlit=True,
+                height=processed_image.height,
+                width=canvas_width,
+                drawing_mode="rect",
+                key="canvas",
+            )
 
             st.markdown("---")
             
-            if st.button("AI解析開始 (学習データ適用)", use_container_width=True):
+            if st.button("この赤枠内を解析する", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
                 learned_rules = load_rules()
                 
-                with st.spinner(f'背景ノイズを除去し、学習ルールを適用中...'):
+                final_image = processed_image.copy()
+                draw = ImageDraw.Draw(final_image)
+                
+                has_box = False
+                if canvas_result.json_data is not None:
+                    objects = canvas_result.json_data["objects"]
+                    if len(objects) > 0:
+                        has_box = True
+                        for obj in objects:
+                            draw.rectangle(
+                                [(obj["left"], obj["top"]), (obj["left"] + obj["width"], obj["top"] + obj["height"])],
+                                outline="red", width=5
+                            )
+
+                st.image(final_image, caption=f"解析対象 (倍率補正: {camera_mag}x)", use_container_width=True)
+                
+                with st.spinner(f'溶血背景を除去し、倍率{camera_mag}xで解析中...'):
                     try:
-                        # ★背景誤認を防ぐための強化プロンプト
+                        # ★倍率計算と再撮影要求を含んだプロンプト
+                        box_instruction = ""
+                        if has_box:
+                            box_instruction = "画像上の**「赤枠の内側」**のみを診断対象としてください。"
+                        else:
+                            box_instruction = "画像全体から、最も鮮明な菌体を探してください。"
+
                         prompt = f"""
-                        あなたは臨床微生物検査技師です。光学顕微鏡の1000倍視野画像を解析します。
+                        あなたは臨床微生物検査技師です。血液培養ボトルのグラム染色像（光学顕微鏡 1000倍視野）を解析します。
 
-                        【最重要ルール: ユーザー学習データ】
-                        以下の過去の指摘を絶対遵守してください:
-                        {learned_rules}
-                        --------------------------------------------------
+                        {box_instruction}
 
-                        【観察手順: 背景と菌の分離】
-                        画像全体をスキャンしますが、**「ピンク色の背景」に騙されないでください。**
-                        
-                        * **菌体**: 明確な「輪郭（エッジ）」があり、コントラストがはっきりしている。
-                        * **背景**: ピンク色だが、輪郭がボヤけている、雲のようなモヤ、不定形の粘液。
-                        * → **輪郭が不明瞭なピンク色はすべて「背景（ゴミ）」として無視**し、診断対象に入れないでください。
+                        【重要条件: 溶血ボトル】
+                        1. **赤血球(RBC)は溶血して存在しません**。サイズ比較にRBCを使わないでください。
+                        2. **背景**: 溶血によるピンク色のデブリ（残渣）が大量にあります。
+                           * **ルール**: 「輪郭が不明瞭なピンク色」は全て背景ノイズとして**徹底的に無視**してください。
+                           * 菌体とみなすのは「明確なエッジ（境界線）」があるものだけです。
+
+                        【倍率設定】
+                        * 顕微鏡: 1000倍
+                        * カメラアダプタ倍率: **{camera_mag}倍**
+                        * ※この倍率感を考慮して、AIの学習データ内にある「1000倍視野での菌のサイズ」と照らし合わせてください。
 
                         【診断ロジック】
-                        以下の手順①〜④に従って判定すること。
+                        ① **グラム染色性**:
+                           * 背景のピンクは無視。
+                           * G+: 青紫/紺色。
+                           * G-: 濃い赤/ピンク（ただし輪郭がくっきりとあるもの限定）。
 
-                        ① **グラム染色性 (背景除外後)**:
-                           * **グラム陽性 (G+)**: 青紫、紺色。
-                           * **グラム陰性 (G-)**: 
-                             濃い赤〜ピンク。**ただし、明確な桿菌/球菌の形をしているものに限る。**
-                             形が定まらないピンクはG-ではない。
+                        ② **形状とサイズ**:
+                           * アスペクト比 1.0-1.5: 球菌。
+                           * アスペクト比 1.5以上: くびれがあれば連鎖球菌、なければ桿菌。
+                           * サイズ: 
+                             - 倍率補正{camera_mag}x を考慮しても「大きい・太い」と感じる → Bacillus等。
+                             - 標準的 → 肺炎球菌、ブドウ球菌、腸内細菌等。
 
-                        ② **形状判定 (アスペクト比とくびれ)**:
-                           * **1.0 〜 1.5**: 球菌 (Cocci)
-                           * **1.5 以上**: 
-                             **★くびれ確認★**: くびれ有=連鎖球菌、くびれ無=桿菌。
-
-                        ③ **配列・集落パターン**:
-                           * **ブドウ球菌**: 立体的なクラスター。
-                           * **連鎖球菌**: 双球菌または連鎖が80％以上。
-
-                        ④ **サイズ感 (1000倍視野)**:
-                           * **大型**: 赤血球(約7µm)の半分〜同等(3-5µm) → Bacillus/Clostridium等。
-                           * **小型**: 赤血球より遥かに小さい(約1µm) → 肺炎球菌、ブドウ球菌、コリネ等。
+                        【最重要: 判断保留のルール】
+                        もし、以下の理由で判定に迷う場合は、無理に推測せず**「再撮影要求」**を出してください。
+                        * 菌体が少なすぎて判断できない。
+                        * デブリと菌の区別がつかない。
+                        * GPCかGPRか（形）がどっちつかずである。
+                        * G+かG-か（色）が中途半端である。
 
                         【出力フォーマット】
+                        もし判断に迷う場合:
+                        「ACTION: REQUEST_SECOND_SLIDE」
+                        「理由: (迷った理由を記述)」
+                        のみを出力して終了すること。
+
+                        判断できる場合:
                         1. **観察所見**:
-                           * 染色性: [G+ / G-] (※背景のピンクは無視済み)
+                           * 染色性: [G+ / G-]
                            * 形状: [球菌 / 桿菌]
-                           * 配列: [ブドウ房 / 連鎖 / 不規則]
-                           * サイズ: [大型 / 小型]
+                           * 倍率補正後のサイズ感: [大型 / 小型 / 標準]
                         
                         2. **推論**:
-                           * 「背景のピンク色は粘液成分として除外しました。明確な輪郭を持つ菌体は〇〇であるため...」
+                           * (背景のデブリは無視した旨を記載)
+                           * 「倍率{camera_mag}倍を考慮すると、サイズ・形状が〇〇であるため...」
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
@@ -193,14 +243,28 @@ if api_key:
                             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                         }
                         
-                        response = model.generate_content([prompt, processed_image], safety_settings=safety_settings)
+                        response = model.generate_content([prompt, final_image], safety_settings=safety_settings)
+                        
                         if response.text:
-                            st.session_state['last_result'] = response.text
-                            st.session_state['last_image'] = processed_image
+                            # ★再撮影要求の判定
+                            if "REQUEST_SECOND_SLIDE" in response.text:
+                                reason = response.text.split("理由:")[-1].strip() if "理由:" in response.text else "判定困難"
+                                st.markdown(f"""
+                                <div class="warning-box">
+                                    ⚠️ AI判定不能: 再撮影が必要です<br>
+                                    理由: {reason}<br>
+                                    <hr>
+                                    ・別の視野（菌がもっと鮮明な場所）を撮影してください。<br>
+                                    ・ゴミが少ない場所を選んでください。
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.session_state['last_result'] = response.text
+                                st.session_state['last_image'] = final_image
                     except Exception as e:
                         st.error(f"解析エラー: {e}")
 
-            # 結果表示
+            # 結果表示（成功時のみ）
             if 'last_result' in st.session_state:
                 st.markdown("---")
                 text = st.session_state['last_result']
@@ -234,12 +298,10 @@ if api_key:
                 
                 st.markdown("---")
                 st.markdown("### 💾 正解データの蓄積")
-                st.caption("AIの精度向上のため、正しい菌種を選んで保存してください。")
                 correct_label = st.selectbox("正しい菌種を選択", ["選択してください"] + valid_categories)
-                
                 if st.button("正解として保存する", use_container_width=True):
                     if correct_label != "選択してください" and GAS_APP_URL and DRIVE_FOLDER_ID:
-                        with st.spinner("学習データとして保存中..."):
+                        with st.spinner("保存中..."):
                             try:
                                 img_byte_arr = io.BytesIO()
                                 st.session_state['last_image'].save(img_byte_arr, format='PNG')
@@ -252,7 +314,7 @@ if api_key:
                                     'mimeType': 'image/png'
                                 }
                                 requests.post(GAS_APP_URL, json=payload)
-                                st.success(f"✅ 「{correct_label}」の正解データとして保存しました。")
+                                st.success("✅ 保存成功")
                             except:
                                 st.error("保存失敗")
 
