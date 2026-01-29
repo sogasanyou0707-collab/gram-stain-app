@@ -1,6 +1,6 @@
-streamlit==1.29.0
+streamlit>=1.30.0
+streamlit-drawable-canvas>=0.9.3
 google-generativeai
 requests
-streamlit-drawable-canvas
-Pillow>=9.0.0
+Pillow
 numpy
