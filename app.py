@@ -5,6 +5,12 @@ import io
 import base64
 import os
 import numpy as np
+import streamlit.elements.image as st_image
+import streamlit.elements.lib.image_utils as st_image_utils
+
+# image_to_urlが存在しない場合、新しい関数に紐付け直す
+if not hasattr(st_image, 'image_to_url'):
+    st_image.image_to_url = st_image_utils.image_to_url
 from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
