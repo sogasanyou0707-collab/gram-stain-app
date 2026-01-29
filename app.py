@@ -5,12 +5,6 @@ import io
 import base64
 import os
 import numpy as np
-import streamlit.elements.image as st_image
-import streamlit.elements.lib.image_utils as st_image_utils
-
-# image_to_urlが存在しない場合、新しい関数に紐付け直す
-if not hasattr(st_image, 'image_to_url'):
-    st_image.image_to_url = st_image_utils.image_to_url
 from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -39,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.44: Fix Error)")
+st.title("🔬 グラム染色 AI (v10.44: Error Fix)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -71,7 +65,7 @@ with st.sidebar:
     if not api_key:
         api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("Mode: 血液培養 (エラー修正版)")
+    st.info("Mode: 血液培養 (エラー対策版)")
     
     st.markdown("---")
     st.markdown("### 📷 倍率設定")
@@ -108,11 +102,11 @@ except ImportError:
     st.error("ライブラリ不足: pip install streamlit-drawable-canvas を実行してください")
     st.stop()
 
-# --- 画像処理関数 (エラー対策版) ---
+# --- 画像処理関数 (エラー対策: .sizeを使用) ---
 def process_image(img, target_width):
     img = img.convert("RGB")
-    # width/height属性を使わず、sizeタプルを使う（古いPillow対策）
-    current_w, current_h = img.size 
+    # width属性ではなくsizeタプルを使う (古いPillow対策)
+    current_w, current_h = img.size
     ratio = target_width / current_w
     new_height = int(current_h * ratio)
     img = img.resize((target_width, new_height), Image.LANCZOS)
@@ -139,14 +133,14 @@ if api_key:
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
-            # キャンバス表示
+            # キャンバス表示 (.heightではなく.size[1]を使用)
             canvas_result = st_canvas(
                 fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
                 stroke_color="#FF0000",
                 background_image=processed_image,
                 update_streamlit=True,
-                height=processed_image.size[1], # .heightではなく.size[1]を使用
+                height=processed_image.size[1], 
                 width=canvas_width,
                 drawing_mode="rect",
                 key="canvas",
@@ -167,11 +161,14 @@ if api_key:
                     if len(objects) > 0:
                         has_box = True
                         for obj in objects:
-                            # 枠を描画（widthパラメータのエラー回避のため、太さはループで描画）
-                            rect_coords = [(obj["left"], obj["top"]), (obj["left"] + obj["width"], obj["top"] + obj["height"])]
-                            for i in range(5): # 太さ5px
+                            # 枠の描画 (太さ指定width=5を使わず、ループで描画してエラー回避)
+                            left = obj["left"]
+                            top = obj["top"]
+                            w = obj["width"]
+                            h = obj["height"]
+                            for i in range(5): # 5px分の太さ
                                 draw.rectangle(
-                                    [(rect_coords[0][0]-i, rect_coords[0][1]-i), (rect_coords[1][0]+i, rect_coords[1][1]+i)],
+                                    [(left-i, top-i), (left + w + i, top + h + i)],
                                     outline="red"
                                 )
 
@@ -253,9 +250,6 @@ if api_key:
                 display_text = text.replace("CATEGORY:", "") 
                 st.write(display_text)
                 
-                # ... (以下、画像表示と保存機能は共通のため省略せずそのまま使用可能ですが、文字数制限のため主要部分のみ提示しました。元のコードの後半部分はそのまま機能します) ...
-                # ※ 完全な動作のためには、先ほどのコードの後半（match_categories以降）も含めてください。
-                
                 match_categories = []
                 for line in text.split('\n'):
                     if "CATEGORY:" in line:
@@ -281,6 +275,7 @@ if api_key:
                                             pass
                 
                 st.markdown("---")
+                st.markdown("### 💾 正解データの蓄積")
                 correct_label = st.selectbox("正しい菌種を選択", ["選択してください"] + valid_categories)
                 if st.button("正解として保存する", use_container_width=True):
                     if correct_label != "選択してください" and GAS_APP_URL and DRIVE_FOLDER_ID:
