@@ -64,3 +64,4 @@ requests
 streamlit-cropper
 streamlit-drawable-canvas
 Pillow>=9.0.0
+Pillow>=9.0.0
