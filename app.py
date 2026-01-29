@@ -9,6 +9,18 @@ from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
+# === 【重要】互換性パッチ (Error Fix) ===
+# streamlit-drawable-canvasが参照する古い関数を、新しいStreamlitから復元する処理
+import streamlit.elements.image as st_image
+try:
+    # 新しいStreamlitの場所から関数を探す
+    from streamlit.elements.lib.image_utils import image_to_url
+    # 古いライブラリが探している場所にその関数を割り当てる
+    if not hasattr(st_image, 'image_to_url'):
+        st_image.image_to_url = image_to_url
+except ImportError:
+    pass # エラーが起きない場合は何もしない
+
 # === 設定エリア ===
 st.set_page_config(
     page_title="GramAI", 
@@ -22,7 +34,6 @@ st.markdown("""
     .stApp {margin-top: -20px;}
     .stImage {overflow-x: auto;}
     iframe {border: 1px solid #ddd;}
-    /* 警告ボックスのデザイン */
     .warning-box {
         padding: 15px;
         background-color: #fff3cd;
@@ -71,7 +82,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📷 倍率設定")
     st.caption("顕微鏡は1000倍固定とみなします。カメラのアダプター倍率を変更した場合は入力してください。")
-    # カメラ倍率の入力機能
     camera_mag = st.number_input("カメラ倍率 (x)", value=1.0, step=0.1, min_value=0.1, max_value=10.0)
 
     st.markdown("---")
@@ -96,7 +106,6 @@ with st.sidebar:
             return []
     valid_categories = [c for c in fetch_categories_from_drive() if c not in ["Inbox", "my_gram_app", "pycache", "__pycache__"] and not c.startswith(".")]
     if valid_categories:
-        st.markdown("---")
         st.write("📂 カテゴリ:", valid_categories)
 
 # --- キャンバスライブラリ ---
@@ -135,6 +144,7 @@ if api_key:
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
+            # --- キャンバス表示 ---
             canvas_result = st_canvas(
                 fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
@@ -171,7 +181,6 @@ if api_key:
                 
                 with st.spinner(f'溶血背景を除去し、倍率{camera_mag}xで解析中...'):
                     try:
-                        # ★倍率計算と再撮影要求を含んだプロンプト
                         box_instruction = ""
                         if has_box:
                             box_instruction = "画像上の**「赤枠の内側」**のみを診断対象としてください。"
@@ -184,41 +193,35 @@ if api_key:
                         {box_instruction}
 
                         【重要条件: 溶血ボトル】
-                        1. **赤血球(RBC)は溶血して存在しません**。サイズ比較にRBCを使わないでください。
-                        2. **背景**: 溶血によるピンク色のデブリ（残渣）が大量にあります。
-                           * **ルール**: 「輪郭が不明瞭なピンク色」は全て背景ノイズとして**徹底的に無視**してください。
-                           * 菌体とみなすのは「明確なエッジ（境界線）」があるものだけです。
+                        1. **赤血球(RBC)は溶血して存在しません**。
+                        2. **背景**: 溶血によるピンク色のデブリは全て無視。
+                           * 菌体とみなすのは「明確なエッジ（境界線）」があるものだけ。
 
                         【倍率設定】
                         * 顕微鏡: 1000倍
-                        * カメラアダプタ倍率: **{camera_mag}倍**
-                        * ※この倍率感を考慮して、AIの学習データ内にある「1000倍視野での菌のサイズ」と照らし合わせてください。
+                        * カメラ倍率: **{camera_mag}倍**
+                        * ※AIの学習データ内にある「1000倍視野での菌のサイズ」と照らし合わせてください。
 
                         【診断ロジック】
                         ① **グラム染色性**:
                            * 背景のピンクは無視。
                            * G+: 青紫/紺色。
-                           * G-: 濃い赤/ピンク（ただし輪郭がくっきりとあるもの限定）。
+                           * G-: 濃い赤/ピンク（輪郭がくっきりとあるもの限定）。
 
                         ② **形状とサイズ**:
                            * アスペクト比 1.0-1.5: 球菌。
                            * アスペクト比 1.5以上: くびれがあれば連鎖球菌、なければ桿菌。
                            * サイズ: 
-                             - 倍率補正{camera_mag}x を考慮しても「大きい・太い」と感じる → Bacillus等。
+                             - 倍率補正{camera_mag}x を考慮しても「大きい・太い」 → Bacillus等。
                              - 標準的 → 肺炎球菌、ブドウ球菌、腸内細菌等。
 
-                        【最重要: 判断保留のルール】
-                        もし、以下の理由で判定に迷う場合は、無理に推測せず**「再撮影要求」**を出してください。
-                        * 菌体が少なすぎて判断できない。
-                        * デブリと菌の区別がつかない。
-                        * GPCかGPRか（形）がどっちつかずである。
-                        * G+かG-か（色）が中途半端である。
+                        【判断保留のルール】
+                        迷う場合は「ACTION: REQUEST_SECOND_SLIDE」と「理由」を出力。
 
                         【出力フォーマット】
                         もし判断に迷う場合:
                         「ACTION: REQUEST_SECOND_SLIDE」
-                        「理由: (迷った理由を記述)」
-                        のみを出力して終了すること。
+                        「理由: ...」
 
                         判断できる場合:
                         1. **観察所見**:
@@ -227,8 +230,7 @@ if api_key:
                            * 倍率補正後のサイズ感: [大型 / 小型 / 標準]
                         
                         2. **推論**:
-                           * (背景のデブリは無視した旨を記載)
-                           * 「倍率{camera_mag}倍を考慮すると、サイズ・形状が〇〇であるため...」
+                           * 「倍率{camera_mag}倍を考慮すると...」
 
                         3. **最も近いカテゴリ**:
                            リスト: [{categories_str}]
@@ -246,7 +248,6 @@ if api_key:
                         response = model.generate_content([prompt, final_image], safety_settings=safety_settings)
                         
                         if response.text:
-                            # ★再撮影要求の判定
                             if "REQUEST_SECOND_SLIDE" in response.text:
                                 reason = response.text.split("理由:")[-1].strip() if "理由:" in response.text else "判定困難"
                                 st.markdown(f"""
@@ -264,7 +265,6 @@ if api_key:
                     except Exception as e:
                         st.error(f"解析エラー: {e}")
 
-            # 結果表示（成功時のみ）
             if 'last_result' in st.session_state:
                 st.markdown("---")
                 text = st.session_state['last_result']
