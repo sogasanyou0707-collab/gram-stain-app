@@ -12,7 +12,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
-st.title("🔬 グラム染色 AI (v10.60: Gemini 2.5 Flash)")
+st.title("🔬 グラム染色 AI (v10.70: Final Stable)")
 
 # --- キャンバスライブラリ ---
 try:
@@ -45,7 +45,7 @@ with st.sidebar:
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
 
-    # カテゴリ取得 (キャッシュ有効)
+    # カテゴリ取得
     @st.cache_data(ttl=60)
     def fetch_categories():
         if not GAS_APP_URL: return []
@@ -63,12 +63,11 @@ def process_image(img, target_width):
     w, h = img.size
     ratio = target_width / w
     new_h = int(h * ratio)
-    # 鮮明化してリサイズ
     return img.resize((target_width, new_h), Image.LANCZOS).filter(ImageFilter.SHARPEN)
 
 # --- メイン処理 ---
 if api_key:
-    # ★ 指定の Gemini 2.5 Flash に固定
+    # ★ Gemini 2.5 Flash に固定
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
     
@@ -77,6 +76,13 @@ if api_key:
     if uploaded_file is not None:
         try:
             raw_image = Image.open(uploaded_file)
+            
+            # 【重要】まず画像が正しく読み込めているかここで表示（確認用）
+            st.markdown("### 1. アップロード画像の確認")
+            st.image(raw_image, caption="元画像", use_column_width=True)
+
+            st.markdown("---")
+            st.markdown("### 2. 解析エリアの指定")
             st.info(f"現在のモード: {drawing_mode} で菌を囲んでください。")
             
             # 画像処理
@@ -84,8 +90,11 @@ if api_key:
             processed_image = process_image(raw_image, canvas_width)
             
             # キャンバス表示
+            # ★重要修正: keyにファイル名を含めることで、画像が変わるたびにツールを強制リセットします
+            canvas_key = f"canvas_{uploaded_file.name}_{drawing_mode}"
+            
             canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.1)",
+                fill_color="rgba(255, 0, 0, 0.1)",  # 薄い赤色
                 stroke_width=3,
                 stroke_color="#FF0000",
                 background_image=processed_image,
@@ -93,7 +102,7 @@ if api_key:
                 height=processed_image.size[1],
                 width=canvas_width,
                 drawing_mode=drawing_mode,
-                key="canvas",
+                key=canvas_key,
             )
             
             # 解析ボタン
@@ -102,24 +111,33 @@ if api_key:
                 draw = ImageDraw.Draw(final_image)
                 
                 has_mark = False
-                # 描画内容を画像に焼き付け
+                # 描画データがあるか確認
                 if canvas_result.json_data and "objects" in canvas_result.json_data:
                     objects = canvas_result.json_data["objects"]
                     if len(objects) > 0:
                         has_mark = True
                         for obj in objects:
-                            l, t, w, h = obj["left"], obj["top"], obj["width"], obj["height"]
+                            # 座標の取得と補正
+                            l = obj["left"]
+                            t = obj["top"]
+                            w = obj["width"]
+                            h = obj["height"]
+                            
+                            # 赤枠・赤丸の焼き付け（線を太くする）
                             if obj["type"] == "rect":
-                                draw.rectangle([(l,t), (l+w,t+h)], outline="red", width=5)
+                                for i in range(5):
+                                    draw.rectangle([(l-i, t-i), (l+w+i, t+h+i)], outline="red")
                             elif obj["type"] in ["circle", "oval"]:
-                                draw.ellipse([(l,t), (l+w,t+h)], outline="red", width=5)
+                                for i in range(5):
+                                    draw.ellipse([(l-i, t-i), (l+w+i, t+h+i)], outline="red")
                 
-                # ★ 画像表示 (互換性重視の use_column_width を使用)
-                st.image(final_image, caption="解析対象", use_column_width=True)
+                # 結果画像の表示
+                st.markdown("### 3. 解析対象イメージ")
+                st.image(final_image, caption="AIが見ている画像（赤枠付き）", use_column_width=True)
                 
                 with st.spinner("Gemini 2.5 Flash で解析中..."):
                     try:
-                        instruction = "赤枠または赤丸の内側を見てください" if has_mark else "画像全体を見てください"
+                        instruction = "画像上の【赤枠または赤丸の内側】を重点的に見てください" if has_mark else "画像全体から最も鮮明な菌体を探してください"
                         prompt = f"""
                         あなたは臨床微生物検査技師です。血液培養グラム染色(1000倍, カメラ{camera_mag}倍)を解析。
                         指示: {instruction}
@@ -141,45 +159,9 @@ if api_key:
             # 結果の表示
             if 'last_result' in st.session_state:
                 st.markdown("---")
-                # CATEGORY行を隠して表示
+                st.markdown("### 4. 解析結果")
                 st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
                 
                 # 参照画像の表示
                 match_cats = []
-                for line in st.session_state['last_result'].split('\n'):
-                    if "CATEGORY:" in line:
-                        match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
-                
-                if match_cats and GAS_APP_URL:
-                    cols = st.columns(len(match_cats))
-                    for i, c in enumerate(match_cats):
-                        if c in valid_categories:
-                            with cols[i]:
-                                try:
-                                    r = requests.get(GAS_APP_URL, params={"action":"get_image","category":c}, timeout=5)
-                                    d = r.json()
-                                    if d.get("found"):
-                                        img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        # 参照画像も安定版表示
-                                        st.image(img, caption=c, use_column_width=True)
-                                except: pass
-                
-                # 正解保存機能
-                st.markdown("---")
-                correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
-                if st.button("保存"):
-                    if correct != "選択してください" and GAS_APP_URL:
-                        buf = io.BytesIO()
-                        st.session_state['last_image'].save(buf, format='PNG')
-                        try:
-                            requests.post(GAS_APP_URL, json={
-                                'image': base64.b64encode(buf.getvalue()).decode(),
-                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            })
-                            st.success("保存しました")
-                        except: st.error("保存失敗")
-
-        except Exception as e:
-            st.error(f"画像エラー: {e}")
+                for line in st.session_state['last_result'].split('\
