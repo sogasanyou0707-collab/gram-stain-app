@@ -39,12 +39,13 @@ with st.sidebar:
     
     st.info("Mode: 自由描画マーキング")
     
+    # 描画ツールの選択
     drawing_mode = st.selectbox("マーカー:", ("rect", "circle", "transform"), 
         format_func=lambda x: {"rect":"四角 (□)", "circle":"円 (○)", "transform":"移動"}[x])
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
 
-    # カテゴリ取得
+    # カテゴリ取得 (キャッシュ有効)
     @st.cache_data(ttl=60)
     def fetch_categories():
         if not GAS_APP_URL: return []
@@ -62,11 +63,12 @@ def process_image(img, target_width):
     w, h = img.size
     ratio = target_width / w
     new_h = int(h * ratio)
+    # 鮮明化してリサイズ
     return img.resize((target_width, new_h), Image.LANCZOS).filter(ImageFilter.SHARPEN)
 
 # --- メイン処理 ---
 if api_key:
-    # ★ご指定のGemini 2.5 Flashに固定
+    # ★ 指定の Gemini 2.5 Flash に固定
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
     
@@ -100,6 +102,7 @@ if api_key:
                 draw = ImageDraw.Draw(final_image)
                 
                 has_mark = False
+                # 描画内容を画像に焼き付け
                 if canvas_result.json_data and "objects" in canvas_result.json_data:
                     objects = canvas_result.json_data["objects"]
                     if len(objects) > 0:
@@ -111,7 +114,7 @@ if api_key:
                             elif obj["type"] in ["circle", "oval"]:
                                 draw.ellipse([(l,t), (l+w,t+h)], outline="red", width=5)
                 
-                # ★修正: 画像表示を安定版(use_column_width)に固定
+                # ★ 画像表示 (互換性重視の use_column_width を使用)
                 st.image(final_image, caption="解析対象", use_column_width=True)
                 
                 with st.spinner("Gemini 2.5 Flash で解析中..."):
@@ -135,8 +138,10 @@ if api_key:
                     except Exception as e:
                         st.error(f"AI解析エラー: {e}")
 
+            # 結果の表示
             if 'last_result' in st.session_state:
                 st.markdown("---")
+                # CATEGORY行を隠して表示
                 st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
                 
                 # 参照画像の表示
@@ -155,11 +160,12 @@ if api_key:
                                     d = r.json()
                                     if d.get("found"):
                                         img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        # ★修正: 画像表示を安定版に
+                                        # 参照画像も安定版表示
                                         st.image(img, caption=c, use_column_width=True)
                                 except: pass
                 
-                # 正解保存
+                # 正解保存機能
+                st.markdown("---")
                 correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
                 if st.button("保存"):
                     if correct != "選択してください" and GAS_APP_URL:
