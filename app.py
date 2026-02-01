@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.45: Stable)")
+st.title("🔬 グラム染色 AI (v10.46: Final Fix)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -147,7 +147,7 @@ if api_key:
 
             st.markdown("---")
             
-            # buttonは use_container_width 対応済み(1.16以降)だが念のため use_container_width=True のまま
+            # buttonは use_container_width 対応済み(ver1.12以降)なのでOK
             if st.button("この赤枠内を解析する", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
                 learned_rules = load_rules()
@@ -171,7 +171,7 @@ if api_key:
                                     outline="red"
                                 )
                 
-                # ★修正: use_container_width -> use_column_width
+                # ★ここを修正しました: use_container_width -> use_column_width
                 st.image(final_image, caption=f"解析対象 (倍率補正: {camera_mag}x)", use_column_width=True)
                 
                 with st.spinner(f'溶血背景を除去し、倍率{camera_mag}xで解析中...'):
@@ -270,7 +270,7 @@ if api_key:
                                             data = res.json()
                                             if data.get("found"):
                                                 img_data = base64.b64decode(data["image"])
-                                                # ★修正: use_container_width -> use_column_width
+                                                # ★ここも修正: use_container_width -> use_column_width
                                                 st.image(Image.open(io.BytesIO(img_data)), caption=category, use_column_width=True)
                                         except:
                                             pass
