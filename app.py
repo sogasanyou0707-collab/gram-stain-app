@@ -9,29 +9,16 @@ from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === バージョン互換性の確保 ===
-# 古いStreamlitでも新しいStreamlitでも動くように、引数を自動調整する魔法の関数
-def compatible_image(image, caption, **kwargs):
-    # 現在のStreamlitが use_container_width (新) に対応しているかチェック
-    try:
-        st.image(image, caption=caption, use_container_width=True, **kwargs)
-    except TypeError:
-        # 対応していなければ use_column_width (旧) を使う
-        st.image(image, caption=caption, use_column_width=True, **kwargs)
-
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
+st.title("🔬 グラム染色 AI (v10.55: Flash Model)")
 
-# バージョン情報の表示（デバッグ用）
-st.sidebar.caption(f"System: Streamlit v{st.__version__}")
-st.title("🔬 グラム染色 AI (v10.53: Universal Fix)")
-
-# --- キャンバスライブラリの読み込み（エラー回避） ---
+# --- キャンバスライブラリ ---
 try:
     from streamlit_drawable_canvas import st_canvas
 except ImportError:
-    st.error("【重要】アプリの再起動が必要です。右下のManage appからRebootしてください。")
+    st.error("エラー: アプリを再起動(Reboot)してください。")
     st.stop()
 
 # --- APIキー等の取得 ---
@@ -79,8 +66,9 @@ def process_image(img, target_width):
 
 # --- メイン処理 ---
 if api_key:
+    # ★修正: Flashモデルに固定 (2.5は誤植でした。正しくは1.5-flashです)
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash") # 安定モデル
+    model = genai.GenerativeModel("gemini-1.5-flash")
     
     uploaded_file = st.file_uploader("画像をアップロード", type=["jpg", "png", "jpeg"])
 
@@ -94,8 +82,6 @@ if api_key:
             processed_image = process_image(raw_image, canvas_width)
             
             # キャンバス表示
-            # ※ここでの画像表示エラーを防ぐため、tryブロックで囲む必要はありませんが
-            # お絵かき機能自体のエラーはライブラリ依存です。
             canvas_result = st_canvas(
                 fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
@@ -108,7 +94,7 @@ if api_key:
                 key="canvas",
             )
             
-            # ボタン（ここも互換性引数は不要、buttonは古いバージョンでもuse_container_width対応済みの場合が多いが念のため引数なし）
+            # 解析ボタン
             if st.button("マーキング内を解析する"):
                 final_image = processed_image.copy()
                 draw = ImageDraw.Draw(final_image)
@@ -125,10 +111,10 @@ if api_key:
                             elif obj["type"] in ["circle", "oval"]:
                                 draw.ellipse([(l,t), (l+w,t+h)], outline="red", width=5)
                 
-                # ★修正箇所：互換関数を使用
-                compatible_image(final_image, caption="解析対象")
+                # ★修正: 画像表示を最も安定した記述に変更
+                st.image(final_image, caption="解析対象", use_column_width=True)
                 
-                with st.spinner("AI解析中..."):
+                with st.spinner("Gemini 1.5 Flash で解析中..."):
                     try:
                         instruction = "赤枠または赤丸の内側を見てください" if has_mark else "画像全体を見てください"
                         prompt = f"""
@@ -169,7 +155,8 @@ if api_key:
                                     d = r.json()
                                     if d.get("found"):
                                         img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        compatible_image(img, caption=c)
+                                        # ★修正: 画像表示を安定版に
+                                        st.image(img, caption=c, use_column_width=True)
                                 except: pass
                 
                 # 正解保存
