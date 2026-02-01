@@ -12,7 +12,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
-st.title("🔬 グラム染色 AI (v10.71: Syntax Fixed)")
+st.title("🔬 グラム染色 AI (v10.90: Simple Canvas)")
 
 # --- キャンバスライブラリ ---
 try:
@@ -39,7 +39,6 @@ with st.sidebar:
     
     st.info("Mode: 自由描画マーキング")
     
-    # 描画ツールの選択
     drawing_mode = st.selectbox("マーカー:", ("rect", "circle", "transform"), 
         format_func=lambda x: {"rect":"四角 (□)", "circle":"円 (○)", "transform":"移動"}[x])
     
@@ -67,7 +66,6 @@ def process_image(img, target_width):
 
 # --- メイン処理 ---
 if api_key:
-    # ★ Gemini 2.5 Flash に固定
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.5-flash")
     
@@ -75,21 +73,18 @@ if api_key:
 
     if uploaded_file is not None:
         try:
+            uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # 1. アップロード画像の確認
-            st.markdown("### 1. アップロード画像の確認")
-            st.image(raw_image, caption="元画像", use_column_width=True)
-
-            st.markdown("---")
-            st.markdown("### 2. 解析エリアの指定")
-            st.info(f"現在のモード: {drawing_mode} で菌を囲んでください。")
+            st.info(f"👇 この画像にマウスで【{drawing_mode}】を描いてください。")
             
             # 画像処理
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
-            # キャンバス表示
+            # ★紛らわしい静止画表示を削除しました。
+            # いきなりキャンバス（お絵かきできる画像）を表示します。
+            
             canvas_key = f"canvas_{uploaded_file.name}_{drawing_mode}"
             
             canvas_result = st_canvas(
@@ -115,10 +110,10 @@ if api_key:
                     if len(objects) > 0:
                         has_mark = True
                         for obj in objects:
-                            l = obj["left"]
-                            t = obj["top"]
-                            w = obj["width"]
-                            h = obj["height"]
+                            l = int(obj["left"])
+                            t = int(obj["top"])
+                            w = int(obj["width"])
+                            h = int(obj["height"])
                             
                             if obj["type"] == "rect":
                                 for i in range(5):
@@ -127,9 +122,9 @@ if api_key:
                                 for i in range(5):
                                     draw.ellipse([(l-i, t-i), (l+w+i, t+h+i)], outline="red")
                 
-                # 結果画像の表示
-                st.markdown("### 3. 解析対象イメージ")
-                st.image(final_image, caption="AIが見ている画像（赤枠付き）", use_column_width=True)
+                # 画像を保存して永続表示
+                st.session_state['display_image'] = final_image
+                st.session_state['has_mark'] = has_mark
                 
                 with st.spinner("Gemini 2.5 Flash で解析中..."):
                     try:
@@ -148,19 +143,20 @@ if api_key:
                             st.warning(f"再撮影推奨: {reason}")
                         else:
                             st.session_state['last_result'] = res.text
-                            st.session_state['last_image'] = final_image
                     except Exception as e:
                         st.error(f"AI解析エラー: {e}")
 
-            # 結果の表示
+            # === 結果表示エリア ===
+            if 'display_image' in st.session_state:
+                st.markdown("### 解析対象イメージ")
+                st.image(st.session_state['display_image'], caption="AIが見ている画像（赤枠付き）", use_column_width=True)
+
             if 'last_result' in st.session_state:
                 st.markdown("---")
-                st.markdown("### 4. 解析結果")
+                st.markdown("### 解析結果")
                 st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
                 
-                # 参照画像の表示
                 match_cats = []
-                # ★修正: splitlines()を使うことで構文エラーを回避
                 for line in st.session_state['last_result'].splitlines():
                     if "CATEGORY:" in line:
                         match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
@@ -178,13 +174,12 @@ if api_key:
                                         st.image(img, caption=c, use_column_width=True)
                                 except: pass
                 
-                # 正解保存機能
                 st.markdown("---")
                 correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
                 if st.button("保存"):
-                    if correct != "選択してください" and GAS_APP_URL:
+                    if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
                         buf = io.BytesIO()
-                        st.session_state['last_image'].save(buf, format='PNG')
+                        st.session_state['display_image'].save(buf, format='PNG')
                         try:
                             requests.post(GAS_APP_URL, json={
                                 'image': base64.b64encode(buf.getvalue()).decode(),
