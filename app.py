@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.46: Final Fix)")
+st.title("🔬 グラム染色 AI (v10.47: Compatibility Fix)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -147,7 +147,7 @@ if api_key:
 
             st.markdown("---")
             
-            # buttonは use_container_width 対応済み(ver1.12以降)なのでOK
+            # buttonは use_container_width 対応済みなのでOK
             if st.button("この赤枠内を解析する", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
                 learned_rules = load_rules()
@@ -171,7 +171,7 @@ if api_key:
                                     outline="red"
                                 )
                 
-                # ★ここを修正しました: use_container_width -> use_column_width
+                # ★修正箇所: use_column_width=True に変更
                 st.image(final_image, caption=f"解析対象 (倍率補正: {camera_mag}x)", use_column_width=True)
                 
                 with st.spinner(f'溶血背景を除去し、倍率{camera_mag}xで解析中...'):
@@ -270,31 +270,10 @@ if api_key:
                                             data = res.json()
                                             if data.get("found"):
                                                 img_data = base64.b64decode(data["image"])
-                                                # ★ここも修正: use_container_width -> use_column_width
+                                                # ★修正箇所: use_column_width=True に変更
                                                 st.image(Image.open(io.BytesIO(img_data)), caption=category, use_column_width=True)
                                         except:
                                             pass
                 
                 st.markdown("---")
-                correct_label = st.selectbox("正しい菌種を選択", ["選択してください"] + valid_categories)
-                if st.button("正解として保存する", use_container_width=True):
-                    if correct_label != "選択してください" and GAS_APP_URL and DRIVE_FOLDER_ID:
-                        with st.spinner("保存中..."):
-                            try:
-                                img_byte_arr = io.BytesIO()
-                                st.session_state['last_image'].save(img_byte_arr, format='PNG')
-                                img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                payload = {
-                                    'image': img_base64,
-                                    'filename': f"CORRECT_{correct_label}_{timestamp}.png",
-                                    'folderId': DRIVE_FOLDER_ID,
-                                    'mimeType': 'image/png'
-                                }
-                                requests.post(GAS_APP_URL, json=payload)
-                                st.success("✅ 保存成功")
-                            except:
-                                st.error("保存失敗")
-
-        except Exception as e:
-            st.error(f"画像エラー: {e}")
+                correct_label = st.selectbox 
