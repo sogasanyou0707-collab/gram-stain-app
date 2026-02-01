@@ -12,7 +12,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
-st.title("🔬 グラム染色 AI (v10.55: Flash Model)")
+st.title("🔬 グラム染色 AI (v10.60: Gemini 2.5 Flash)")
 
 # --- キャンバスライブラリ ---
 try:
@@ -66,9 +66,9 @@ def process_image(img, target_width):
 
 # --- メイン処理 ---
 if api_key:
-    # ★修正: Flashモデルに固定 (2.5は誤植でした。正しくは1.5-flashです)
+    # ★ご指定のGemini 2.5 Flashに固定
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     
     uploaded_file = st.file_uploader("画像をアップロード", type=["jpg", "png", "jpeg"])
 
@@ -111,10 +111,10 @@ if api_key:
                             elif obj["type"] in ["circle", "oval"]:
                                 draw.ellipse([(l,t), (l+w,t+h)], outline="red", width=5)
                 
-                # ★修正: 画像表示を最も安定した記述に変更
+                # ★修正: 画像表示を安定版(use_column_width)に固定
                 st.image(final_image, caption="解析対象", use_column_width=True)
                 
-                with st.spinner("Gemini 1.5 Flash で解析中..."):
+                with st.spinner("Gemini 2.5 Flash で解析中..."):
                     try:
                         instruction = "赤枠または赤丸の内側を見てください" if has_mark else "画像全体を見てください"
                         prompt = f"""
