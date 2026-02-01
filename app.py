@@ -32,7 +32,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.50: Drawing Mode)")
+st.title("🔬 グラム染色 AI (v10.51: Fixed Canvas)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -64,14 +64,13 @@ with st.sidebar:
     
     st.info("Mode: 自由描画マーキング")
     
-    # ★追加機能: 描画ツールの選択
+    # ツール選択
     st.markdown("### 🖍️ ツール選択")
     drawing_mode = st.selectbox(
-        "マーカーの形を選んでください:",
+        "マーカーの形:",
         ("rect", "circle", "transform"),
         format_func=lambda x: {"rect": "四角形 (□)", "circle": "円 (○)", "transform": "移動・変形"}[x]
     )
-    st.caption("※「移動・変形」を選ぶと、描いた図形を動かせます。")
 
     st.markdown("---")
     st.markdown("### 📷 倍率設定")
@@ -132,32 +131,31 @@ if api_key:
             raw_image = Image.open(uploaded_file)
             
             st.markdown("### 🖍️ 観察位置の指定")
-            st.info("サイドバーで「四角」か「円」を選び、**菌がいる場所を囲んで**ください。")
+            st.info(f"現在のモード: {drawing_mode} で菌を囲んでください。")
             
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
             # キャンバスの描画
             canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.1)",  # 塗りつぶし色
+                fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
-                stroke_color="#FF0000",             # 赤線
+                stroke_color="#FF0000",
                 background_image=processed_image,
                 update_streamlit=True,
                 height=processed_image.size[1],
                 width=canvas_width,
-                drawing_mode=drawing_mode,          # ★選択したツールを使用
+                drawing_mode=drawing_mode,
                 key="canvas",
             )
 
             st.markdown("---")
             
-            # 最新Streamlitなので use_container_width=True が正しく動作します
+            # 最新Streamlit設定なので use_container_width=True でOK
             if st.button("マーキング内を解析する", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
                 learned_rules = load_rules()
                 
-                # 画像に描画内容を焼き付ける
                 final_image = processed_image.copy()
                 draw = ImageDraw.Draw(final_image)
                 
@@ -167,13 +165,11 @@ if api_key:
                     if len(objects) > 0:
                         has_mark = True
                         for obj in objects:
-                            # 座標の取得
                             left = obj["left"]
                             top = obj["top"]
                             w = obj["width"]
                             h = obj["height"]
                             
-                            # 図形タイプに応じて描画
                             if obj["type"] == "rect":
                                 for i in range(5):
                                     draw.rectangle([(left-i, top-i), (left+w+i, top+h+i)], outline="red")
@@ -198,7 +194,6 @@ if api_key:
 
                         【倍率設定】
                         * カメラアダプタ倍率: **{camera_mag}倍**
-                        (※この倍率を考慮して、標準的な菌体サイズと比較してください)
 
                         【診断ロジック】
                         ① **グラム染色性**: G+(青紫) / G-(濃い赤/ピンクかつ明瞭な輪郭)
@@ -248,7 +243,6 @@ if api_key:
                 display_text = text.replace("CATEGORY:", "") 
                 st.write(display_text)
                 
-                # 正解データ保存機能など (省略なしで動作します)
                 match_categories = []
                 for line in text.split('\n'):
                     if "CATEGORY:" in line:
