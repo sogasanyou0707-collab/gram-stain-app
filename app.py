@@ -12,7 +12,7 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
-st.title("🔬 グラム染色 AI (v10.70: Final Stable)")
+st.title("🔬 グラム染色 AI (v10.71: Syntax Fixed)")
 
 # --- キャンバスライブラリ ---
 try:
@@ -77,7 +77,7 @@ if api_key:
         try:
             raw_image = Image.open(uploaded_file)
             
-            # 【重要】まず画像が正しく読み込めているかここで表示（確認用）
+            # 1. アップロード画像の確認
             st.markdown("### 1. アップロード画像の確認")
             st.image(raw_image, caption="元画像", use_column_width=True)
 
@@ -90,11 +90,10 @@ if api_key:
             processed_image = process_image(raw_image, canvas_width)
             
             # キャンバス表示
-            # ★重要修正: keyにファイル名を含めることで、画像が変わるたびにツールを強制リセットします
             canvas_key = f"canvas_{uploaded_file.name}_{drawing_mode}"
             
             canvas_result = st_canvas(
-                fill_color="rgba(255, 0, 0, 0.1)",  # 薄い赤色
+                fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
                 stroke_color="#FF0000",
                 background_image=processed_image,
@@ -111,19 +110,16 @@ if api_key:
                 draw = ImageDraw.Draw(final_image)
                 
                 has_mark = False
-                # 描画データがあるか確認
                 if canvas_result.json_data and "objects" in canvas_result.json_data:
                     objects = canvas_result.json_data["objects"]
                     if len(objects) > 0:
                         has_mark = True
                         for obj in objects:
-                            # 座標の取得と補正
                             l = obj["left"]
                             t = obj["top"]
                             w = obj["width"]
                             h = obj["height"]
                             
-                            # 赤枠・赤丸の焼き付け（線を太くする）
                             if obj["type"] == "rect":
                                 for i in range(5):
                                     draw.rectangle([(l-i, t-i), (l+w+i, t+h+i)], outline="red")
@@ -164,4 +160,40 @@ if api_key:
                 
                 # 参照画像の表示
                 match_cats = []
-                for line in st.session_state['last_result'].split('\
+                # ★修正: splitlines()を使うことで構文エラーを回避
+                for line in st.session_state['last_result'].splitlines():
+                    if "CATEGORY:" in line:
+                        match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
+                
+                if match_cats and GAS_APP_URL:
+                    cols = st.columns(len(match_cats))
+                    for i, c in enumerate(match_cats):
+                        if c in valid_categories:
+                            with cols[i]:
+                                try:
+                                    r = requests.get(GAS_APP_URL, params={"action":"get_image","category":c}, timeout=5)
+                                    d = r.json()
+                                    if d.get("found"):
+                                        img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
+                                        st.image(img, caption=c, use_column_width=True)
+                                except: pass
+                
+                # 正解保存機能
+                st.markdown("---")
+                correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
+                if st.button("保存"):
+                    if correct != "選択してください" and GAS_APP_URL:
+                        buf = io.BytesIO()
+                        st.session_state['last_image'].save(buf, format='PNG')
+                        try:
+                            requests.post(GAS_APP_URL, json={
+                                'image': base64.b64encode(buf.getvalue()).decode(),
+                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                'folderId': DRIVE_FOLDER_ID,
+                                'mimeType': 'image/png'
+                            })
+                            st.success("保存しました")
+                        except: st.error("保存失敗")
+
+        except Exception as e:
+            st.error(f"画像エラー: {e}")
