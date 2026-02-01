@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🔬 グラム染色 AI (v10.44: Error Fix)")
+st.title("🔬 グラム染色 AI (v10.45: Stable)")
 
 # --- 秘密情報の取得 ---
 api_key = None
@@ -65,7 +65,7 @@ with st.sidebar:
     if not api_key:
         api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("Mode: 血液培養 (エラー対策版)")
+    st.info("Mode: 血液培養 (安定版)")
     
     st.markdown("---")
     st.markdown("### 📷 倍率設定")
@@ -102,10 +102,9 @@ except ImportError:
     st.error("ライブラリ不足: pip install streamlit-drawable-canvas を実行してください")
     st.stop()
 
-# --- 画像処理関数 (エラー対策: .sizeを使用) ---
+# --- 画像処理関数 ---
 def process_image(img, target_width):
     img = img.convert("RGB")
-    # width属性ではなくsizeタプルを使う (古いPillow対策)
     current_w, current_h = img.size
     ratio = target_width / current_w
     new_height = int(current_h * ratio)
@@ -133,7 +132,7 @@ if api_key:
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
-            # キャンバス表示 (.heightではなく.size[1]を使用)
+            # キャンバス表示
             canvas_result = st_canvas(
                 fill_color="rgba(255, 0, 0, 0.1)",
                 stroke_width=3,
@@ -148,6 +147,7 @@ if api_key:
 
             st.markdown("---")
             
+            # buttonは use_container_width 対応済み(1.16以降)だが念のため use_container_width=True のまま
             if st.button("この赤枠内を解析する", use_container_width=True):
                 categories_str = ", ".join(valid_categories) if valid_categories else "登録なし"
                 learned_rules = load_rules()
@@ -161,18 +161,18 @@ if api_key:
                     if len(objects) > 0:
                         has_box = True
                         for obj in objects:
-                            # 枠の描画 (太さ指定width=5を使わず、ループで描画してエラー回避)
                             left = obj["left"]
                             top = obj["top"]
                             w = obj["width"]
                             h = obj["height"]
-                            for i in range(5): # 5px分の太さ
+                            for i in range(5): 
                                 draw.rectangle(
                                     [(left-i, top-i), (left + w + i, top + h + i)],
                                     outline="red"
                                 )
-
-                st.image(final_image, caption=f"解析対象 (倍率補正: {camera_mag}x)", use_container_width=True)
+                
+                # ★修正: use_container_width -> use_column_width
+                st.image(final_image, caption=f"解析対象 (倍率補正: {camera_mag}x)", use_column_width=True)
                 
                 with st.spinner(f'溶血背景を除去し、倍率{camera_mag}xで解析中...'):
                     try:
@@ -270,12 +270,12 @@ if api_key:
                                             data = res.json()
                                             if data.get("found"):
                                                 img_data = base64.b64decode(data["image"])
-                                                st.image(Image.open(io.BytesIO(img_data)), caption=category, use_container_width=True)
+                                                # ★修正: use_container_width -> use_column_width
+                                                st.image(Image.open(io.BytesIO(img_data)), caption=category, use_column_width=True)
                                         except:
                                             pass
                 
                 st.markdown("---")
-                st.markdown("### 💾 正解データの蓄積")
                 correct_label = st.selectbox("正しい菌種を選択", ["選択してください"] + valid_categories)
                 if st.button("正解として保存する", use_container_width=True):
                     if correct_label != "選択してください" and GAS_APP_URL and DRIVE_FOLDER_ID:
