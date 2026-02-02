@@ -10,7 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v14.4: Scroll Grips)")
+st.title("🔬 グラム染色 AI (v15.0: Mode Switch)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -28,10 +28,11 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画像の上下にある「青い帯」を左右になぞるとスクロールできます。")
+    st.info("【使い方】\n1. 「移動モード」で菌の場所までスクロール\n2. 「枠操作モード」に切り替えて囲む")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
+    # 画質設定
     st.markdown("---")
     img_quality = st.select_slider(
         "画質 (幅ピクセル)",
@@ -52,7 +53,7 @@ with st.sidebar:
     valid_categories = [c for c in fetch_categories() if c not in ["Inbox", "my_gram_app", "pycache"] and not c.startswith(".")]
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
-# --- CSS: スクロールグリップのデザイン ---
+# --- CSS: スクロール設定とポインター制御 ---
 st.markdown(f"""
 <style>
     /* アプリ全体の横スクロールを許可 */
@@ -70,29 +71,6 @@ st.markdown(f"""
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
-    }}
-    
-    /* スクロール用グリップバーのデザイン */
-    .scroll-grip {{
-        width: {img_quality}px;     /* 画像と同じ幅にする */
-        height: 50px;               /* 指で触りやすい太さ */
-        background-color: #e0f2f1;  /* 薄い青緑色 */
-        border: 2px dashed #009688; /* 枠線 */
-        color: #00796b;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-        font-size: 1.2em;
-        cursor: grab;
-        margin-bottom: 5px;
-        margin-top: 5px;
-        border-radius: 8px;
-    }}
-    
-    .scroll-grip:active {{
-        background-color: #b2dfdb;
-        cursor: grabbing;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -120,17 +98,37 @@ if api_key:
             if sharpness:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
-            # --- 切り抜きエリア ---
+            # --- 操作モード切替スイッチ (ラジオボタン) ---
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
             
-            # === 上部スクロールグリップ ===
-            st.markdown(f"""
-            <div class="scroll-grip">
-                ⬅️ ここを指でなぞって横スクロールしてください ➡️
-            </div>
-            """, unsafe_allow_html=True)
+            mode = st.radio(
+                "👇 操作モードを選択してください",
+                ["🖐️ 移動 (スクロール)", "✂️ 枠操作 (切り抜き)"],
+                horizontal=True,
+                index=0 # デフォルトは移動モード
+            )
 
-            # 画像本体 (st_cropper)
+            # ★CSSマジック: 移動モードの時は、キャンバスのタッチ判定を無効化する
+            if mode == "🖐️ 移動 (スクロール)":
+                st.markdown("""
+                <style>
+                    iframe { pointer-events: none !important; }
+                </style>
+                <div style="background-color:#e3f2fd; padding:10px; border-radius:5px; color:#0d47a1;">
+                    <b>現在: 移動モード</b><br>
+                    画像の好きな場所を指でなぞってスクロールしてください。<br>
+                    場所が決まったら「枠操作」に切り替えてください。
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background-color:#fbe9e7; padding:10px; border-radius:5px; color:#bf360c;">
+                    <b>現在: 枠操作モード</b><br>
+                    赤い枠を動かして、菌を囲んでください。
+                </div>
+                """, unsafe_allow_html=True)
+
+            # 画像本体
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
@@ -138,13 +136,6 @@ if api_key:
                 aspect_ratio=None,
                 should_resize_image=False
             )
-            
-            # === 下部スクロールグリップ (念のため下にも配置) ===
-            st.markdown(f"""
-            <div class="scroll-grip">
-                ⬅️ ここを指でなぞって横スクロールしてください ➡️
-            </div>
-            """, unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("### 2. 選択された画像")
