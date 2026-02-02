@@ -10,7 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v14.0: Scroll Fixed)")
+st.title("🔬 グラム染色 AI (v14.1: High Res Scroll)")
 
 # --- CSS: 横スクロールと左詰め表示の強制 ---
 st.markdown("""
@@ -20,25 +20,25 @@ st.markdown("""
         overflow-x: auto !important;
     }
     
-    /* ツール類を強制的に左寄せにして、左切れを防ぐ */
+    /* ツール類を強制的に左寄せ */
     .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {
         align-items: flex-start !important;
         justify-content: flex-start !important;
     }
 
-    /* クロッパー（キャンバス）を囲むエリアをスクロール可能にする */
+    /* クロッパー（キャンバス）を囲むエリアの設定 */
     .scroll-container {
         width: 100%;
         overflow-x: auto;
         white-space: nowrap;
-        -webkit-overflow-scrolling: touch; /* スマホでのスクロールを滑らかに */
+        -webkit-overflow-scrolling: touch;
         padding-bottom: 20px;
-        border: 1px dashed #ccc; /* スクロールエリアがわかるように枠線 */
+        border: 1px dashed #ccc;
     }
     
-    /* iframe（クロッパー実体）の幅を確保 */
+    /* iframeの幅制限を解除（高画質表示のため） */
     iframe {
-        min-width: 700px !important;
+        min-width: 100% !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -63,7 +63,14 @@ with st.sidebar:
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # シャープネス調整
+    # 画質調整
+    st.markdown("---")
+    img_quality = st.select_slider(
+        "画質設定 (数値が高いほど綺麗ですがスクロールが増えます)",
+        options=[700, 1000, 1400, 2000],
+        value=1400
+    )
+    
     sharpness = st.checkbox("画像をシャープにする", value=True)
 
     @st.cache_data(ttl=60)
@@ -89,22 +96,26 @@ if api_key:
             uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # --- 画像のリサイズ処理 (幅700px固定) ---
-            target_width = 700
+            # --- 画像のリサイズ処理 ---
+            # 画質設定スライダーの値を使用 (デフォルト1400px)
+            target_width = img_quality
+            
             if raw_image.width != target_width:
                 ratio = target_width / raw_image.width
                 new_height = int(raw_image.height * ratio)
+                # LANCZOSフィルタで綺麗に縮小
                 raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
             
             # --- シャープネス処理 ---
             if sharpness:
+                # 輪郭強調
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             # --- 切り抜きエリア ---
-            st.markdown("### 1. 解析エリアの選択")
-            st.caption("※画面を横にスクロールして全体を見てください")
+            st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
+            st.caption("画面を横にスクロールして操作してください")
             
-            # スクロール用コンテナ開始
+            # スクロール用コンテナ
             st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
 
             cropped_img = st_cropper(
@@ -112,10 +123,9 @@ if api_key:
                 realtime_update=True,
                 box_color='#FF0000',
                 aspect_ratio=None,
-                should_resize_image=False # 既に700pxにしているのでリサイズ不要
+                should_resize_image=False
             )
             
-            # スクロール用コンテナ終了
             st.markdown('</div>', unsafe_allow_html=True)
             
             st.markdown("---")
@@ -123,7 +133,8 @@ if api_key:
             
             col1, col2 = st.columns([1, 2])
             with col1:
-                 st.image(cropped_img, caption="送信画像", use_container_width=True)
+                 # 切り抜いた画像を表示
+                 st.image(cropped_img, caption="AI送信画像", use_container_width=True)
             
             with col2:
                 st.write("")
