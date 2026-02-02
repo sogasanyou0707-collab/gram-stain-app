@@ -10,7 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v13.0: Cropper)")
+st.title("🔬 グラム染色 AI (v13.1: Mobile Fix)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -55,28 +55,39 @@ if api_key:
             uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # --- 切り抜きエリア ---
-            col1, col2 = st.columns([2, 1])
+            # ★スマホ対策: 画像が大きすぎるとはみ出るため、幅を調整する
+            # (iPhone等の写真は4000px以上あるため、画面に収まるサイズに縮小)
+            max_width = 700
+            if raw_image.width > max_width:
+                ratio = max_width / raw_image.width
+                new_height = int(raw_image.height * ratio)
+                raw_image = raw_image.resize((max_width, new_height))
             
+            # --- 切り抜きエリア (スマホで見やすいよう縦並びに変更) ---
+            
+            st.markdown("### 1. 解析エリアの選択")
+            st.caption("枠を動かして、菌がいる場所を囲んでください")
+            
+            # 切り抜きツール
+            cropped_img = st_cropper(
+                raw_image,
+                realtime_update=True,
+                box_color='#FF0000',
+                aspect_ratio=None,
+                should_resize_image=True
+            )
+            
+            st.markdown("---")
+            st.markdown("### 2. 選択された画像")
+            
+            # プレビューとボタンを横並びにする
+            col1, col2 = st.columns([1, 2])
             with col1:
-                st.subheader("1. 解析エリアの選択")
-                st.caption("枠を動かして、菌がいる場所を囲んでください")
-                # 切り抜きツール (リアルタイム更新)
-                cropped_img = st_cropper(
-                    raw_image,
-                    realtime_update=True,
-                    box_color='#FF0000',
-                    aspect_ratio=None,
-                    should_resize_image=True
-                )
+                 st.image(cropped_img, caption="送信画像", use_container_width=True)
             
             with col2:
-                st.subheader("2. 選択された画像")
-                # 切り抜かれた結果をプレビュー表示
-                st.image(cropped_img, caption="AIに送られる画像", use_container_width=True)
-                
-                # 解析ボタン
-                if st.button("この範囲を解析する", type="primary"):
+                st.write("") # 余白
+                if st.button("この範囲を解析する", type="primary", use_container_width=True):
                     st.session_state['display_image'] = cropped_img
                     
                     with st.spinner("Gemini 2.5 Flash で解析中..."):
@@ -121,7 +132,7 @@ if api_key:
                 
                 st.markdown("---")
                 correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
-                if st.button("保存"):
+                if st.button("保存", use_container_width=True):
                     if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
                         buf = io.BytesIO()
                         st.session_state['display_image'].save(buf, format='PNG')
