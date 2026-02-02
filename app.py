@@ -10,7 +10,19 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v13.1: Mobile Fix)")
+st.title("🔬 グラム染色 AI (v13.2: Mobile Fit)")
+
+# --- CSS: 横スクロールを可能にする設定 ---
+st.markdown("""
+<style>
+    /* キャンバスが画面からはみ出る場合にスクロールさせるクラス */
+    .scroll-canvas {
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -31,6 +43,11 @@ with st.sidebar:
     st.info("【使い方】\n画像の「解析したい部分」を枠で囲んでください。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
+    
+    # ★スマホ対応: 表示モード切替
+    st.markdown("---")
+    st.write("📱 **表示モード設定**")
+    view_mode = st.radio("画面サイズ調整", ["スマホ (縮小表示)", "オリジナル (横スクロール)"])
 
     @st.cache_data(ttl=60)
     def fetch_categories():
@@ -55,38 +72,48 @@ if api_key:
             uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # ★スマホ対策: 画像が大きすぎるとはみ出るため、幅を調整する
-            # (iPhone等の写真は4000px以上あるため、画面に収まるサイズに縮小)
-            max_width = 700
-            if raw_image.width > max_width:
-                ratio = max_width / raw_image.width
-                new_height = int(raw_image.height * ratio)
-                raw_image = raw_image.resize((max_width, new_height))
-            
-            # --- 切り抜きエリア (スマホで見やすいよう縦並びに変更) ---
-            
+            # --- 画像のリサイズ処理 ---
+            if view_mode == "スマホ (縮小表示)":
+                # スマホの一般的な幅に合わせて350pxに強制リサイズ
+                target_width = 350
+                if raw_image.width > target_width:
+                    ratio = target_width / raw_image.width
+                    new_height = int(raw_image.height * ratio)
+                    raw_image = raw_image.resize((target_width, new_height))
+                    st.caption(f"※スマホ用に縮小しました (幅: {target_width}px)")
+            else:
+                st.caption("※オリジナルサイズで表示します（横にスクロールしてください）")
+
+            # --- 切り抜きエリア ---
             st.markdown("### 1. 解析エリアの選択")
             st.caption("枠を動かして、菌がいる場所を囲んでください")
             
+            # 横スクロール用のコンテナ開始
+            if view_mode == "オリジナル (横スクロール)":
+                st.markdown('<div class="scroll-canvas">', unsafe_allow_html=True)
+
             # 切り抜きツール
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
                 box_color='#FF0000',
                 aspect_ratio=None,
-                should_resize_image=True
+                should_resize_image=False # リサイズは自前で行うのでFalse
             )
+            
+            # 横スクロール用のコンテナ終了
+            if view_mode == "オリジナル (横スクロール)":
+                st.markdown('</div>', unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("### 2. 選択された画像")
             
-            # プレビューとボタンを横並びにする
             col1, col2 = st.columns([1, 2])
             with col1:
                  st.image(cropped_img, caption="送信画像", use_container_width=True)
             
             with col2:
-                st.write("") # 余白
+                st.write("")
                 if st.button("この範囲を解析する", type="primary", use_container_width=True):
                     st.session_state['display_image'] = cropped_img
                     
