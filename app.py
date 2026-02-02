@@ -10,38 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v14.1: High Res Scroll)")
-
-# --- CSS: 横スクロールと左詰め表示の強制 ---
-st.markdown("""
-<style>
-    /* アプリ全体の横スクロールを許可 */
-    .stApp {
-        overflow-x: auto !important;
-    }
-    
-    /* ツール類を強制的に左寄せ */
-    .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {
-        align-items: flex-start !important;
-        justify-content: flex-start !important;
-    }
-
-    /* クロッパー（キャンバス）を囲むエリアの設定 */
-    .scroll-container {
-        width: 100%;
-        overflow-x: auto;
-        white-space: nowrap;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 20px;
-        border: 1px dashed #ccc;
-    }
-    
-    /* iframeの幅制限を解除（高画質表示のため） */
-    iframe {
-        min-width: 100% !important;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.title("🔬 グラム染色 AI (v14.2: Force Width)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -59,14 +28,14 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【使い方】\n画像を横にスクロールして、解析したい部分を枠で囲んでください。")
+    st.info("【使い方】\n画面を横にスクロールして、解析したい部分を枠で囲んでください。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # 画質調整
+    # 画質設定 (初期値を1400pxに設定)
     st.markdown("---")
     img_quality = st.select_slider(
-        "画質設定 (数値が高いほど綺麗ですがスクロールが増えます)",
+        "画質 (幅のピクセル数)",
         options=[700, 1000, 1400, 2000],
         value=1400
     )
@@ -84,6 +53,30 @@ with st.sidebar:
     valid_categories = [c for c in fetch_categories() if c not in ["Inbox", "my_gram_app", "pycache"] and not c.startswith(".")]
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
+# --- CSS: 強制横スクロール設定 ---
+# ユーザーが選択した img_quality (例:1400) をCSSに直接埋め込みます。
+# これにより、画像表示エリア（iframe）が物理的にその幅になります。
+st.markdown(f"""
+<style>
+    /* アプリ全体の横スクロールを許可 */
+    .stApp {{
+        overflow-x: auto !important;
+    }}
+    
+    /* 左詰め表示 (左が見切れるのを防ぐ) */
+    .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {{
+        align-items: flex-start !important;
+        justify-content: flex-start !important;
+    }}
+
+    /* iframe（クロッパー）の幅を、選択した画質サイズに強制固定 */
+    iframe {{
+        min-width: {img_quality}px !important;
+        width: {img_quality}px !important;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
 # --- メイン処理 ---
 if api_key:
     genai.configure(api_key=api_key)
@@ -97,27 +90,22 @@ if api_key:
             raw_image = Image.open(uploaded_file)
             
             # --- 画像のリサイズ処理 ---
-            # 画質設定スライダーの値を使用 (デフォルト1400px)
             target_width = img_quality
             
             if raw_image.width != target_width:
                 ratio = target_width / raw_image.width
                 new_height = int(raw_image.height * ratio)
-                # LANCZOSフィルタで綺麗に縮小
                 raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
             
             # --- シャープネス処理 ---
             if sharpness:
-                # 輪郭強調
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             # --- 切り抜きエリア ---
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.caption("画面を横にスクロールして操作してください")
+            st.caption("👈 画面を横にスクロールしてください 👉")
             
-            # スクロール用コンテナ
-            st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
-
+            # st_cropper自体を表示 (CSSで幅が強制的に広がっています)
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
@@ -126,14 +114,11 @@ if api_key:
                 should_resize_image=False
             )
             
-            st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown("---")
             st.markdown("### 2. 選択された画像")
             
             col1, col2 = st.columns([1, 2])
             with col1:
-                 # 切り抜いた画像を表示
                  st.image(cropped_img, caption="AI送信画像", use_container_width=True)
             
             with col2:
