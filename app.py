@@ -10,15 +10,35 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v13.3: Sharpened)")
+st.title("🔬 グラム染色 AI (v14.0: Scroll Fixed)")
 
-# --- CSS: 横スクロール設定 ---
+# --- CSS: 横スクロールと左詰め表示の強制 ---
 st.markdown("""
 <style>
-    .scroll-canvas {
+    /* アプリ全体の横スクロールを許可 */
+    .stApp {
+        overflow-x: auto !important;
+    }
+    
+    /* ツール類を強制的に左寄せにして、左切れを防ぐ */
+    .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {
+        align-items: flex-start !important;
+        justify-content: flex-start !important;
+    }
+
+    /* クロッパー（キャンバス）を囲むエリアをスクロール可能にする */
+    .scroll-container {
+        width: 100%;
         overflow-x: auto;
         white-space: nowrap;
-        padding-bottom: 10px;
+        -webkit-overflow-scrolling: touch; /* スマホでのスクロールを滑らかに */
+        padding-bottom: 20px;
+        border: 1px dashed #ccc; /* スクロールエリアがわかるように枠線 */
+    }
+    
+    /* iframe（クロッパー実体）の幅を確保 */
+    iframe {
+        min-width: 700px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -39,14 +59,9 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【使い方】\n画像の「解析したい部分」を枠で囲んでください。")
+    st.info("【使い方】\n画像を横にスクロールして、解析したい部分を枠で囲んでください。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
-    
-    # 画質・表示設定
-    st.markdown("---")
-    st.write("📱 **表示モード設定**")
-    view_mode = st.radio("画面サイズ調整", ["スマホ (高画質リサイズ)", "オリジナル (横スクロール)"])
     
     # シャープネス調整
     sharpness = st.checkbox("画像をシャープにする", value=True)
@@ -74,40 +89,34 @@ if api_key:
             uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # --- 画像のリサイズ処理 ---
-            if view_mode == "スマホ (高画質リサイズ)":
-                # 350pxだと粗すぎるため、550pxまで引き上げ
-                target_width = 550
-                if raw_image.width > target_width:
-                    ratio = target_width / raw_image.width
-                    new_height = int(raw_image.height * ratio)
-                    raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
-                    st.caption(f"※高画質リサイズ (幅: {target_width}px)")
-            else:
-                st.caption("※オリジナルサイズ")
-
+            # --- 画像のリサイズ処理 (幅700px固定) ---
+            target_width = 700
+            if raw_image.width != target_width:
+                ratio = target_width / raw_image.width
+                new_height = int(raw_image.height * ratio)
+                raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
+            
             # --- シャープネス処理 ---
             if sharpness:
-                # アンシャープマスクで輪郭をくっきりさせる
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             # --- 切り抜きエリア ---
             st.markdown("### 1. 解析エリアの選択")
-            st.caption("枠を動かして、菌がいる場所を囲んでください")
+            st.caption("※画面を横にスクロールして全体を見てください")
             
-            if view_mode == "オリジナル (横スクロール)":
-                st.markdown('<div class="scroll-canvas">', unsafe_allow_html=True)
+            # スクロール用コンテナ開始
+            st.markdown('<div class="scroll-container">', unsafe_allow_html=True)
 
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
                 box_color='#FF0000',
                 aspect_ratio=None,
-                should_resize_image=False
+                should_resize_image=False # 既に700pxにしているのでリサイズ不要
             )
             
-            if view_mode == "オリジナル (横スクロール)":
-                st.markdown('</div>', unsafe_allow_html=True)
+            # スクロール用コンテナ終了
+            st.markdown('</div>', unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("### 2. 選択された画像")
