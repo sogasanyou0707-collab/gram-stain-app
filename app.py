@@ -10,7 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v14.2: Force Width)")
+st.title("🔬 グラム染色 AI (v14.3: Touch Scrollbar)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -28,14 +28,14 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【使い方】\n画面を横にスクロールして、解析したい部分を枠で囲んでください。")
+    st.info("【操作のヒント】\n● 画像内の移動: 画面下の「赤いバー」をスクロール\n● または「2本指」でスワイプ")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # 画質設定 (初期値を1400pxに設定)
+    # 画質設定
     st.markdown("---")
     img_quality = st.select_slider(
-        "画質 (幅のピクセル数)",
+        "画質 (幅ピクセル)",
         options=[700, 1000, 1400, 2000],
         value=1400
     )
@@ -53,9 +53,8 @@ with st.sidebar:
     valid_categories = [c for c in fetch_categories() if c not in ["Inbox", "my_gram_app", "pycache"] and not c.startswith(".")]
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
-# --- CSS: 強制横スクロール設定 ---
-# ユーザーが選択した img_quality (例:1400) をCSSに直接埋め込みます。
-# これにより、画像表示エリア（iframe）が物理的にその幅になります。
+# --- CSS: 極太スクロールバーの実装 ---
+# ユーザーが選択した img_quality をCSSに埋め込み、強制的に幅を広げる
 st.markdown(f"""
 <style>
     /* アプリ全体の横スクロールを許可 */
@@ -63,16 +62,42 @@ st.markdown(f"""
         overflow-x: auto !important;
     }}
     
-    /* 左詰め表示 (左が見切れるのを防ぐ) */
+    /* 左詰め表示 */
     .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {{
         align-items: flex-start !important;
         justify-content: flex-start !important;
     }}
 
-    /* iframe（クロッパー）の幅を、選択した画質サイズに強制固定 */
+    /* iframe（画像エリア）の幅を強制固定 */
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
+        margin-bottom: 20px; /* 下に余白を作る */
+    }}
+
+    /* === スクロールバーのカスタマイズ (Webkit系: Chrome, Safari, Edge) === */
+    /* 全体の幅・高さ（指で押しやすいように太くする） */
+    ::-webkit-scrollbar {{
+        height: 25px !important;
+        width: 25px !important;
+    }}
+    
+    /* スクロールバーの背景（トラック） */
+    ::-webkit-scrollbar-track {{
+        background: #f0f2f6;
+        border-radius: 10px;
+    }}
+    
+    /* 動くつまみ部分（サム） */
+    ::-webkit-scrollbar-thumb {{
+        background-color: #FF4B4B; /* 目立つ赤色 (Streamlitカラー) */
+        border-radius: 12px;
+        border: 4px solid #f0f2f6; /* 隙間を作って角丸感を出す */
+    }}
+
+    /* つまみを触ったとき */
+    ::-webkit-scrollbar-thumb:hover {{
+        background-color: #FF0000;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -89,23 +114,21 @@ if api_key:
             uploaded_file.seek(0)
             raw_image = Image.open(uploaded_file)
             
-            # --- 画像のリサイズ処理 ---
+            # --- 画像のリサイズ ---
             target_width = img_quality
-            
             if raw_image.width != target_width:
                 ratio = target_width / raw_image.width
                 new_height = int(raw_image.height * ratio)
                 raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
             
-            # --- シャープネス処理 ---
+            # --- シャープネス ---
             if sharpness:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             # --- 切り抜きエリア ---
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.caption("👈 画面を横にスクロールしてください 👉")
+            st.info("👇 **画面最下部の「赤いバー」**、または **「2本指」** で横スクロールできます")
             
-            # st_cropper自体を表示 (CSSで幅が強制的に広がっています)
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
