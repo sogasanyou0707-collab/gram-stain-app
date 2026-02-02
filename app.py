@@ -9,10 +9,10 @@ from PIL import Image, ImageFilter, ImageDraw
 from datetime import datetime
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
-# === 設定エリア (Streamlit 1.32.0 対応) ===
+# === 設定エリア (Latest Version) ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
 st.markdown("""<style>.stApp {margin-top: -20px;} iframe {border: 1px solid #ddd;}</style>""", unsafe_allow_html=True)
-st.title("🔬 グラム染色 AI (v11.1: Syntax Safe)")
+st.title("🔬 グラム染色 AI (v12.1: Canvas Fixed)")
 
 # --- キャンバスライブラリ ---
 try:
@@ -65,8 +65,8 @@ def process_image(img, target_width):
 
 # --- メイン処理 ---
 if api_key:
-    # ★ Gemini 2.5 Flash 指定
     genai.configure(api_key=api_key)
+    # ★ Gemini 2.5 Flash
     model = genai.GenerativeModel("gemini-2.5-flash")
     
     uploaded_file = st.file_uploader("画像をアップロード", type=["jpg", "png", "jpeg"])
@@ -81,7 +81,7 @@ if api_key:
             canvas_width = 800
             processed_image = process_image(raw_image, canvas_width)
             
-            # 画像重複防止キー
+            # キャッシュ詰まり防止キー
             canvas_key = f"canvas_{uploaded_file.name}_{drawing_mode}"
             
             # キャンバス表示
@@ -97,8 +97,8 @@ if api_key:
                 key=canvas_key,
             )
             
-            # 解析ボタン
-            if st.button("マーキング内を解析する", use_column_width=True):
+            # 解析ボタン (最新版対応)
+            if st.button("マーキング内を解析する", use_container_width=True):
                 final_image = processed_image.copy()
                 draw = ImageDraw.Draw(final_image)
                 
@@ -120,13 +120,11 @@ if api_key:
                                 for i in range(5):
                                     draw.ellipse([(l-i, t-i), (l+w+i, t+h+i)], outline="red")
                 
-                # 画像保存
                 st.session_state['display_image'] = final_image
                 st.session_state['has_mark'] = has_mark
                 
                 with st.spinner("Gemini 2.5 Flash で解析中..."):
                     try:
-                        # ★ここを修正しました（改行エラー対策）
                         if has_mark:
                             instruction = "赤枠または赤丸の内側を重点的に見てください"
                         else:
@@ -152,7 +150,7 @@ if api_key:
             # === 結果表示エリア ===
             if 'display_image' in st.session_state:
                 st.markdown("### 解析対象イメージ")
-                st.image(st.session_state['display_image'], caption="AIが見ている画像", use_column_width=True)
+                st.image(st.session_state['display_image'], caption="AIが見ている画像", use_container_width=True)
 
             if 'last_result' in st.session_state:
                 st.markdown("---")
@@ -174,12 +172,12 @@ if api_key:
                                     d = r.json()
                                     if d.get("found"):
                                         img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        st.image(img, caption=c, use_column_width=True)
+                                        st.image(img, caption=c, use_container_width=True)
                                 except: pass
                 
                 st.markdown("---")
                 correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
-                if st.button("保存", use_column_width=True):
+                if st.button("保存", use_container_width=True):
                     if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
                         buf = io.BytesIO()
                         st.session_state['display_image'].save(buf, format='PNG')
