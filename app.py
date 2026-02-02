@@ -4,18 +4,17 @@ import requests
 import io
 import base64
 import os
-from PIL import Image
+from PIL import Image, ImageFilter
 from datetime import datetime
 from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v13.2: Mobile Fit)")
+st.title("🔬 グラム染色 AI (v13.3: Sharpened)")
 
-# --- CSS: 横スクロールを可能にする設定 ---
+# --- CSS: 横スクロール設定 ---
 st.markdown("""
 <style>
-    /* キャンバスが画面からはみ出る場合にスクロールさせるクラス */
     .scroll-canvas {
         overflow-x: auto;
         white-space: nowrap;
@@ -44,10 +43,13 @@ with st.sidebar:
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # ★スマホ対応: 表示モード切替
+    # 画質・表示設定
     st.markdown("---")
     st.write("📱 **表示モード設定**")
-    view_mode = st.radio("画面サイズ調整", ["スマホ (縮小表示)", "オリジナル (横スクロール)"])
+    view_mode = st.radio("画面サイズ調整", ["スマホ (高画質リサイズ)", "オリジナル (横スクロール)"])
+    
+    # シャープネス調整
+    sharpness = st.checkbox("画像をシャープにする", value=True)
 
     @st.cache_data(ttl=60)
     def fetch_categories():
@@ -73,35 +75,37 @@ if api_key:
             raw_image = Image.open(uploaded_file)
             
             # --- 画像のリサイズ処理 ---
-            if view_mode == "スマホ (縮小表示)":
-                # スマホの一般的な幅に合わせて350pxに強制リサイズ
-                target_width = 350
+            if view_mode == "スマホ (高画質リサイズ)":
+                # 350pxだと粗すぎるため、550pxまで引き上げ
+                target_width = 550
                 if raw_image.width > target_width:
                     ratio = target_width / raw_image.width
                     new_height = int(raw_image.height * ratio)
-                    raw_image = raw_image.resize((target_width, new_height))
-                    st.caption(f"※スマホ用に縮小しました (幅: {target_width}px)")
+                    raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
+                    st.caption(f"※高画質リサイズ (幅: {target_width}px)")
             else:
-                st.caption("※オリジナルサイズで表示します（横にスクロールしてください）")
+                st.caption("※オリジナルサイズ")
+
+            # --- シャープネス処理 ---
+            if sharpness:
+                # アンシャープマスクで輪郭をくっきりさせる
+                raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             # --- 切り抜きエリア ---
             st.markdown("### 1. 解析エリアの選択")
             st.caption("枠を動かして、菌がいる場所を囲んでください")
             
-            # 横スクロール用のコンテナ開始
             if view_mode == "オリジナル (横スクロール)":
                 st.markdown('<div class="scroll-canvas">', unsafe_allow_html=True)
 
-            # 切り抜きツール
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
                 box_color='#FF0000',
                 aspect_ratio=None,
-                should_resize_image=False # リサイズは自前で行うのでFalse
+                should_resize_image=False
             )
             
-            # 横スクロール用のコンテナ終了
             if view_mode == "オリジナル (横スクロール)":
                 st.markdown('</div>', unsafe_allow_html=True)
             
@@ -138,7 +142,6 @@ if api_key:
                 st.subheader("3. 解析結果")
                 st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
                 
-                # 参照画像の表示
                 match_cats = []
                 for line in st.session_state['last_result'].splitlines():
                     if "CATEGORY:" in line:
