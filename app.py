@@ -10,7 +10,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v14.3: Touch Scrollbar)")
+st.title("🔬 グラム染色 AI (v14.4: Scroll Grips)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -28,11 +28,10 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作のヒント】\n● 画像内の移動: 画面下の「赤いバー」をスクロール\n● または「2本指」でスワイプ")
+    st.info("【操作方法】\n画像の上下にある「青い帯」を左右になぞるとスクロールできます。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # 画質設定
     st.markdown("---")
     img_quality = st.select_slider(
         "画質 (幅ピクセル)",
@@ -53,8 +52,7 @@ with st.sidebar:
     valid_categories = [c for c in fetch_categories() if c not in ["Inbox", "my_gram_app", "pycache"] and not c.startswith(".")]
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
-# --- CSS: 極太スクロールバーの実装 ---
-# ユーザーが選択した img_quality をCSSに埋め込み、強制的に幅を広げる
+# --- CSS: スクロールグリップのデザイン ---
 st.markdown(f"""
 <style>
     /* アプリ全体の横スクロールを許可 */
@@ -68,36 +66,33 @@ st.markdown(f"""
         justify-content: flex-start !important;
     }}
 
-    /* iframe（画像エリア）の幅を強制固定 */
+    /* 画像エリアの幅固定 */
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
-        margin-bottom: 20px; /* 下に余白を作る */
-    }}
-
-    /* === スクロールバーのカスタマイズ (Webkit系: Chrome, Safari, Edge) === */
-    /* 全体の幅・高さ（指で押しやすいように太くする） */
-    ::-webkit-scrollbar {{
-        height: 25px !important;
-        width: 25px !important;
     }}
     
-    /* スクロールバーの背景（トラック） */
-    ::-webkit-scrollbar-track {{
-        background: #f0f2f6;
-        border-radius: 10px;
+    /* スクロール用グリップバーのデザイン */
+    .scroll-grip {{
+        width: {img_quality}px;     /* 画像と同じ幅にする */
+        height: 50px;               /* 指で触りやすい太さ */
+        background-color: #e0f2f1;  /* 薄い青緑色 */
+        border: 2px dashed #009688; /* 枠線 */
+        color: #00796b;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 1.2em;
+        cursor: grab;
+        margin-bottom: 5px;
+        margin-top: 5px;
+        border-radius: 8px;
     }}
     
-    /* 動くつまみ部分（サム） */
-    ::-webkit-scrollbar-thumb {{
-        background-color: #FF4B4B; /* 目立つ赤色 (Streamlitカラー) */
-        border-radius: 12px;
-        border: 4px solid #f0f2f6; /* 隙間を作って角丸感を出す */
-    }}
-
-    /* つまみを触ったとき */
-    ::-webkit-scrollbar-thumb:hover {{
-        background-color: #FF0000;
+    .scroll-grip:active {{
+        background-color: #b2dfdb;
+        cursor: grabbing;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -127,8 +122,15 @@ if api_key:
 
             # --- 切り抜きエリア ---
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.info("👇 **画面最下部の「赤いバー」**、または **「2本指」** で横スクロールできます")
             
+            # === 上部スクロールグリップ ===
+            st.markdown(f"""
+            <div class="scroll-grip">
+                ⬅️ ここを指でなぞって横スクロールしてください ➡️
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 画像本体 (st_cropper)
             cropped_img = st_cropper(
                 raw_image,
                 realtime_update=True,
@@ -136,6 +138,13 @@ if api_key:
                 aspect_ratio=None,
                 should_resize_image=False
             )
+            
+            # === 下部スクロールグリップ (念のため下にも配置) ===
+            st.markdown(f"""
+            <div class="scroll-grip">
+                ⬅️ ここを指でなぞって横スクロールしてください ➡️
+            </div>
+            """, unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("### 2. 選択された画像")
