@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🔬", layout="wide")
-st.title("🔬 グラム染色 AI (v19.2: Force Scroll)")
+st.title("🔬 グラム染色 AI (v19.3: Speed Control)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -29,11 +29,22 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画面の「上下左右の細いフチ」を長押しすると、その方向にスクロールします。")
+    st.info("【操作方法】\n画面の「上下左右のフチ」を長押しするとスクロールします。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
     st.markdown("---")
+    
+    # ★追加機能: スクロール感度（速度）の調整
+    scroll_speed = st.slider(
+        "スクロール感度 (速度)",
+        min_value=5,    # ゆっくり (細かい調整用)
+        max_value=100,  # 高速
+        value=20,       # 初期値 (以前の半分以下にして微調整しやすく)
+        step=5,
+        help="数値が小さいほどゆっくり細かく動きます。"
+    )
+
     img_quality = st.select_slider(
         "画質 (幅ピクセル)",
         options=[700, 1000, 1400, 2000],
@@ -74,8 +85,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 「総当たり」エッジスクロール ---
-components.html("""
+# --- JavaScript: 可変速度エッジスクロール ---
+# Pythonの変数 scroll_speed をJavaScriptの中に埋め込みます
+components.html(f"""
 <script>
     const existing = window.parent.document.getElementById('scroll-frame');
     if (existing) existing.remove();
@@ -84,77 +96,68 @@ components.html("""
     frame.id = 'scroll-frame';
     frame.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:999999;';
 
-    // 帯の太さ (15px)
     const edgeSize = '15px';
     const edgeColor = 'rgba(0, 150, 255, 0.3)';
     const activeColor = 'rgba(0, 150, 255, 0.9)';
+    
+    // ★Pythonで設定した速度をここに適用
+    const speed = {scroll_speed};
 
-    const edgeStyle = `position:fixed; background:${edgeColor}; pointer-events:auto; touch-action:none;`;
+    const edgeStyle = `position:fixed; background:${{edgeColor}}; pointer-events:auto; touch-action:none;`;
     
     const edges = [
-        { style: `${edgeStyle} top:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:-50 },
-        { style: `${edgeStyle} bottom:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:50 },
-        { style: `${edgeStyle} top:0; left:0; width:${edgeSize}; height:100%;`, dx:-50, dy:0 },
-        { style: `${edgeStyle} top:0; right:0; width:${edgeSize}; height:100%;`, dx:50, dy:0 }
+        {{ style: `${{edgeStyle}} top:0; left:0; width:100%; height:${{edgeSize}};`, dx:0, dy:-speed }},
+        {{ style: `${{edgeStyle}} bottom:0; left:0; width:100%; height:${{edgeSize}};`, dx:0, dy:speed }},
+        {{ style: `${{edgeStyle}} top:0; left:0; width:${{edgeSize}}; height:100%;`, dx:-speed, dy:0 }},
+        {{ style: `${{edgeStyle}} top:0; right:0; width:${{edgeSize}}; height:100%;`, dx:speed, dy:0 }}
     ];
 
     let scrollInterval = null;
 
-    // ★総当たりスクロール関数
     function performScroll(dx, dy) {
-        // 1. まずウィンドウ全体を動かす
         window.parent.scrollBy(dx, dy);
-
-        // 2. 画面内の「div」「section」「main」タグを全部調べて、スクロールできそうなやつを全部動かす
         const elements = window.parent.document.querySelectorAll('div, section, main, [data-testid="stAppViewContainer"]');
-        
-        elements.forEach(el => {
-            // スクロール可能な幅がある要素なら動かす
-            if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) {
-                el.scrollBy({ left: dx, top: dy, behavior: 'auto' });
-            }
-        });
+        elements.forEach(el => {{
+            if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) {{
+                el.scrollBy({{ left: dx, top: dy, behavior: 'auto' }});
+            }}
+        }});
     }
 
-    function startScroll(dx, dy, element) {
+    function startScroll(dx, dy, element) {{
         if (scrollInterval) return;
         
         element.style.backgroundColor = activeColor;
-        
-        // 初動
         performScroll(dx, dy);
 
-        // 連続動作 (スピードアップ: 20ms間隔)
-        scrollInterval = setInterval(() => {
+        // 30ms間隔で連続実行
+        scrollInterval = setInterval(() => {{
             performScroll(dx, dy);
-        }, 20);
-    }
+        }}, 30);
+    }}
 
-    function stopScroll(element) {
+    function stopScroll(element) {{
         clearInterval(scrollInterval);
         scrollInterval = null;
         if(element) element.style.backgroundColor = edgeColor;
-    }
+    }}
 
-    edges.forEach(e => {
+    edges.forEach(e => {{
         const div = window.parent.document.createElement('div');
         div.style.cssText = e.style;
         
-        // スマホ用タッチイベント
-        div.addEventListener('touchstart', (ev) => { 
+        div.addEventListener('touchstart', (ev) => {{ 
             ev.preventDefault(); 
             startScroll(e.dx, e.dy, div); 
-        }, {passive: false});
+        }}, {{passive: false}});
         
         div.addEventListener('touchend', () => stopScroll(div));
-        
-        // PC用マウスイベント
         div.addEventListener('mousedown', () => startScroll(e.dx, e.dy, div));
         div.addEventListener('mouseup', () => stopScroll(div));
         div.addEventListener('mouseleave', () => stopScroll(div));
         
         frame.appendChild(div);
-    });
+    }});
 
     window.parent.document.body.appendChild(frame);
 </script>
@@ -263,4 +266,4 @@ if api_key:
                         except: st.error("保存失敗")
 
         except Exception as e:
-            st.error(f"画像エラー: {e}")
+            st.error(f
