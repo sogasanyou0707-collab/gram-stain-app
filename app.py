@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🔬", layout="wide")
-st.title("🔬 グラム染色 AI (v19.4: Safe Syntax Fix)")
+st.title("🔬 グラム染色 AI (v19.5: Syntax Fix)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -65,6 +65,7 @@ with st.sidebar:
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
 # --- CSS: 画像幅の強制固定 ---
+# f-stringの干渉を防ぐため、CSS内の波括弧は二重{{ }}にしています
 st.markdown(f"""
 <style>
     /* 可能な限りスクロールを許可する設定 */
@@ -85,13 +86,15 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 安全な記述方式に変更 ---
-# JSコードを普通の文字列として定義し、後から __SPEED__ を置換します
+# --- JavaScript: 安全な記述方式 ---
+# JSコード内でf-stringエラーが出ないよう、通常の文字列として定義します
 js_code = """
 <script>
+    // 古いスクロール枠があれば削除
     const existing = window.parent.document.getElementById('scroll-frame');
     if (existing) existing.remove();
 
+    // 新しいスクロール枠を作成
     const frame = window.parent.document.createElement('div');
     frame.id = 'scroll-frame';
     frame.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:999999;';
@@ -101,7 +104,7 @@ js_code = """
     const edgeColor = 'rgba(0, 150, 255, 0.3)';
     const activeColor = 'rgba(0, 150, 255, 0.9)';
     
-    // Pythonから渡された速度
+    // Pythonから渡された速度 (後で置換されます)
     const speed = __SPEED__;
 
     const edgeStyle = `position:fixed; background:${edgeColor}; pointer-events:auto; touch-action:none;`;
@@ -131,41 +134,4 @@ js_code = """
         element.style.backgroundColor = activeColor;
         performScroll(dx, dy);
 
-        scrollInterval = setInterval(() => {
-            performScroll(dx, dy);
-        }, 30);
-    }
-
-    function stopScroll(element) {
-        clearInterval(scrollInterval);
-        scrollInterval = null;
-        if(element) element.style.backgroundColor = edgeColor;
-    }
-
-    edges.forEach(e => {
-        const div = window.parent.document.createElement('div');
-        div.style.cssText = e.style;
-        
-        div.addEventListener('touchstart', (ev) => { 
-            ev.preventDefault(); 
-            startScroll(e.dx, e.dy, div); 
-        }, {passive: false});
-        
-        div.addEventListener('touchend', () => stopScroll(div));
-        div.addEventListener('mousedown', () => startScroll(e.dx, e.dy, div));
-        div.addEventListener('mouseup', () => stopScroll(div));
-        div.addEventListener('mouseleave', () => stopScroll(div));
-        
-        frame.appendChild(div);
-    });
-
-    window.parent.document.body.appendChild(frame);
-</script>
-"""
-
-# ここで速度数値を埋め込みます
-components.html(js_code.replace("__SPEED__", str(scroll_speed)), height=0)
-
-# --- メイン処理 ---
-if api_key:
-    genai.configure(api_key=api_key
+        //
