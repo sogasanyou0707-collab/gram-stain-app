@@ -266,4 +266,4 @@ if api_key:
                         except: st.error("保存失敗")
 
         except Exception as e:
-            st.error(f
+            st.error(f"画像エラー: {e}")
