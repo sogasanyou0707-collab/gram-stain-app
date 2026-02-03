@@ -237,4 +237,41 @@ if api_key:
             if 'last_result' in st.session_state:
                 st.markdown("---")
                 st.subheader("3. 解析結果")
-                st.write(st.session_state['last_result'].replace
+                st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
+                
+                match_cats = []
+                for line in st.session_state['last_result'].splitlines():
+                    if "CATEGORY:" in line:
+                        match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
+                
+                if match_cats and GAS_APP_URL:
+                    cols = st.columns(len(match_cats))
+                    for i, c in enumerate(match_cats):
+                        if c in valid_categories:
+                            with cols[i]:
+                                try:
+                                    r = requests.get(GAS_APP_URL, params={"action":"get_image","category":c}, timeout=5)
+                                    d = r.json()
+                                    if d.get("found"):
+                                        img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
+                                        st.image(img, caption=c, use_container_width=True)
+                                except: pass
+                
+                st.markdown("---")
+                correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
+                if st.button("保存", use_container_width=True):
+                    if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
+                        buf = io.BytesIO()
+                        st.session_state['display_image'].save(buf, format='PNG')
+                        try:
+                            requests.post(GAS_APP_URL, json={
+                                'image': base64.b64encode(buf.getvalue()).decode(),
+                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                'folderId': DRIVE_FOLDER_ID,
+                                'mimeType': 'image/png'
+                            })
+                            st.success("保存しました")
+                        except: st.error("保存失敗")
+
+        except Exception as e:
+            st.error(f"画像エラー: {e}")
