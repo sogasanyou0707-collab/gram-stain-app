@@ -251,4 +251,16 @@ if api_key:
                 if st.button("保存", use_container_width=True):
                     if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
                         buf = io.BytesIO()
-                        st
+                        st.session_state['display_image'].save(buf, format='PNG')
+                        try:
+                            requests.post(GAS_APP_URL, json={
+                                'image': base64.b64encode(buf.getvalue()).decode(),
+                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                'folderId': DRIVE_FOLDER_ID,
+                                'mimeType': 'image/png'
+                            })
+                            st.success("保存しました")
+                        except: st.error("保存失敗")
+
+        except Exception as e:
+            st.error(f"画像エラー: {e}")
