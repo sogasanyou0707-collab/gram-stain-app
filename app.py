@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🔬", layout="wide")
-st.title("🔬 グラム染色 AI (v19.3: Speed Control)")
+st.title("🔬 グラム染色 AI (v19.4: Safe Syntax Fix)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -35,12 +35,12 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # ★追加機能: スクロール感度（速度）の調整
+    # スクロール感度（速度）
     scroll_speed = st.slider(
         "スクロール感度 (速度)",
-        min_value=5,    # ゆっくり (細かい調整用)
-        max_value=100,  # 高速
-        value=20,       # 初期値 (以前の半分以下にして微調整しやすく)
+        min_value=5,
+        max_value=100,
+        value=20,
         step=5,
         help="数値が小さいほどゆっくり細かく動きます。"
     )
@@ -85,9 +85,9 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 可変速度エッジスクロール ---
-# Pythonの変数 scroll_speed をJavaScriptの中に埋め込みます
-components.html(f"""
+# --- JavaScript: 安全な記述方式に変更 ---
+# JSコードを普通の文字列として定義し、後から __SPEED__ を置換します
+js_code = """
 <script>
     const existing = window.parent.document.getElementById('scroll-frame');
     if (existing) existing.remove();
@@ -96,20 +96,21 @@ components.html(f"""
     frame.id = 'scroll-frame';
     frame.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:999999;';
 
+    // 帯の太さ (15px)
     const edgeSize = '15px';
     const edgeColor = 'rgba(0, 150, 255, 0.3)';
     const activeColor = 'rgba(0, 150, 255, 0.9)';
     
-    // ★Pythonで設定した速度をここに適用
-    const speed = {scroll_speed};
+    // Pythonから渡された速度
+    const speed = __SPEED__;
 
-    const edgeStyle = `position:fixed; background:${{edgeColor}}; pointer-events:auto; touch-action:none;`;
+    const edgeStyle = `position:fixed; background:${edgeColor}; pointer-events:auto; touch-action:none;`;
     
     const edges = [
-        {{ style: `${{edgeStyle}} top:0; left:0; width:100%; height:${{edgeSize}};`, dx:0, dy:-speed }},
-        {{ style: `${{edgeStyle}} bottom:0; left:0; width:100%; height:${{edgeSize}};`, dx:0, dy:speed }},
-        {{ style: `${{edgeStyle}} top:0; left:0; width:${{edgeSize}}; height:100%;`, dx:-speed, dy:0 }},
-        {{ style: `${{edgeStyle}} top:0; right:0; width:${{edgeSize}}; height:100%;`, dx:speed, dy:0 }}
+        { style: `${edgeStyle} top:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:-speed },
+        { style: `${edgeStyle} bottom:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:speed },
+        { style: `${edgeStyle} top:0; left:0; width:${edgeSize}; height:100%;`, dx:-speed, dy:0 },
+        { style: `${edgeStyle} top:0; right:0; width:${edgeSize}; height:100%;`, dx:speed, dy:0 }
     ];
 
     let scrollInterval = null;
@@ -117,39 +118,38 @@ components.html(f"""
     function performScroll(dx, dy) {
         window.parent.scrollBy(dx, dy);
         const elements = window.parent.document.querySelectorAll('div, section, main, [data-testid="stAppViewContainer"]');
-        elements.forEach(el => {{
-            if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) {{
-                el.scrollBy({{ left: dx, top: dy, behavior: 'auto' }});
-            }}
-        }});
+        elements.forEach(el => {
+            if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) {
+                el.scrollBy({ left: dx, top: dy, behavior: 'auto' });
+            }
+        });
     }
 
-    function startScroll(dx, dy, element) {{
+    function startScroll(dx, dy, element) {
         if (scrollInterval) return;
         
         element.style.backgroundColor = activeColor;
         performScroll(dx, dy);
 
-        // 30ms間隔で連続実行
-        scrollInterval = setInterval(() => {{
+        scrollInterval = setInterval(() => {
             performScroll(dx, dy);
-        }}, 30);
-    }}
+        }, 30);
+    }
 
-    function stopScroll(element) {{
+    function stopScroll(element) {
         clearInterval(scrollInterval);
         scrollInterval = null;
         if(element) element.style.backgroundColor = edgeColor;
-    }}
+    }
 
-    edges.forEach(e => {{
+    edges.forEach(e => {
         const div = window.parent.document.createElement('div');
         div.style.cssText = e.style;
         
-        div.addEventListener('touchstart', (ev) => {{ 
+        div.addEventListener('touchstart', (ev) => { 
             ev.preventDefault(); 
             startScroll(e.dx, e.dy, div); 
-        }}, {{passive: false}});
+        }, {passive: false});
         
         div.addEventListener('touchend', () => stopScroll(div));
         div.addEventListener('mousedown', () => startScroll(e.dx, e.dy, div));
@@ -157,113 +157,15 @@ components.html(f"""
         div.addEventListener('mouseleave', () => stopScroll(div));
         
         frame.appendChild(div);
-    }});
+    });
 
     window.parent.document.body.appendChild(frame);
 </script>
-""", height=0)
+"""
+
+# ここで速度数値を埋め込みます
+components.html(js_code.replace("__SPEED__", str(scroll_speed)), height=0)
 
 # --- メイン処理 ---
 if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    
-    uploaded_file = st.file_uploader("画像をアップロード", type=["jpg", "png", "jpeg"])
-
-    if uploaded_file is not None:
-        try:
-            uploaded_file.seek(0)
-            raw_image = Image.open(uploaded_file)
-            
-            # --- 画像のリサイズ ---
-            target_width = img_quality
-            if raw_image.width != target_width:
-                ratio = target_width / raw_image.width
-                new_height = int(raw_image.height * ratio)
-                raw_image = raw_image.resize((target_width, new_height), Image.LANCZOS)
-            
-            # --- シャープネス ---
-            if sharpness:
-                raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
-
-            st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.info("画面の **「青いフチ」** を長押しするとスクロールします")
-
-            # 画像本体
-            cropped_img = st_cropper(
-                raw_image,
-                realtime_update=True,
-                box_color='#FF0000',
-                aspect_ratio=None,
-                should_resize_image=False
-            )
-            
-            st.markdown("---")
-            st.markdown("### 2. 選択された画像")
-            
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                 st.image(cropped_img, caption="AI送信画像", use_container_width=True)
-            
-            with col2:
-                st.write("")
-                if st.button("この範囲を解析する", type="primary", use_container_width=True):
-                    st.session_state['display_image'] = cropped_img
-                    
-                    with st.spinner("Gemini 2.5 Flash で解析中..."):
-                        try:
-                            prompt = f"""
-                            あなたは臨床微生物検査技師です。血液培養グラム染色(1000倍, カメラ{camera_mag}倍)の「切り抜き画像」を解析してください。
-                            
-                            指示: 画像内の菌体の特徴を詳細に分析してください。
-                            条件: 溶血ボトル(RBCなし, 背景無視)。
-                            判定困難時は「ACTION: REQUEST_SECOND_SLIDE」と理由を出力。
-                            最後は「CATEGORY:カテゴリ名」。
-                            """
-                            res = model.generate_content([prompt, cropped_img])
-                            st.session_state['last_result'] = res.text
-                        except Exception as e:
-                            st.error(f"AI解析エラー: {e}")
-
-            # === 結果表示エリア ===
-            if 'last_result' in st.session_state:
-                st.markdown("---")
-                st.subheader("3. 解析結果")
-                st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
-                
-                match_cats = []
-                for line in st.session_state['last_result'].splitlines():
-                    if "CATEGORY:" in line:
-                        match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
-                
-                if match_cats and GAS_APP_URL:
-                    cols = st.columns(len(match_cats))
-                    for i, c in enumerate(match_cats):
-                        if c in valid_categories:
-                            with cols[i]:
-                                try:
-                                    r = requests.get(GAS_APP_URL, params={"action":"get_image","category":c}, timeout=5)
-                                    d = r.json()
-                                    if d.get("found"):
-                                        img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        st.image(img, caption=c, use_container_width=True)
-                                except: pass
-                
-                st.markdown("---")
-                correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
-                if st.button("保存", use_container_width=True):
-                    if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
-                        buf = io.BytesIO()
-                        st.session_state['display_image'].save(buf, format='PNG')
-                        try:
-                            requests.post(GAS_APP_URL, json={
-                                'image': base64.b64encode(buf.getvalue()).decode(),
-                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            })
-                            st.success("保存しました")
-                        except: st.error("保存失敗")
-
-        except Exception as e:
-            st.error(f"画像エラー: {e}")
+    genai.configure(api_key=api_key
