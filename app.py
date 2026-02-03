@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v17.1: Left D-Pad Fix)")
+st.title("🔬 グラム染色 AI (v17.2: Target Fix)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -29,7 +29,7 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画面左下の「十字キー」でスクロールできます。")
+    st.info("【操作方法】\n左下のコントローラーで画像をスクロールできます。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
@@ -56,7 +56,12 @@ with st.sidebar:
 # --- CSS: 画像幅の強制固定 ---
 st.markdown(f"""
 <style>
-    .stApp {{ overflow: auto !important; }}
+    /* Streamlitのメインコンテナにスクロール許可を与える */
+    [data-testid="stAppViewContainer"] {{
+        overflow: auto !important;
+        -webkit-overflow-scrolling: touch; /* スマホで滑らかに */
+    }}
+    
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
@@ -64,32 +69,29 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 左下コントローラー (タッチ対応版) ---
+# --- JavaScript: 左下コントローラー (ターゲット修正版) ---
 components.html("""
 <script>
-    // 既存のボタンがあれば削除
     const existing = window.parent.document.getElementById('gram-dpad');
     if (existing) existing.remove();
 
-    // コントローラーのコンテナ作成
     const dpad = window.parent.document.createElement('div');
     dpad.id = 'gram-dpad';
     dpad.style.position = 'fixed';
     dpad.style.bottom = '20px';
-    dpad.style.left = '20px';  /* 左下に配置 */
+    dpad.style.left = '20px';
     dpad.style.width = '140px';
     dpad.style.height = '140px';
     dpad.style.zIndex = '999999';
-    dpad.style.backgroundColor = 'rgba(0, 0, 0, 0.1)'; /* 薄いグレー背景 */
+    dpad.style.backgroundColor = 'rgba(0,0,0,0.1)';
     dpad.style.borderRadius = '50%';
-    dpad.style.touchAction = 'none'; // ブラウザのデフォルト動作防止
+    dpad.style.touchAction = 'none';
 
-    // 共通ボタンスタイル (指で押しやすいように少し大きく)
     const btnStyle = `
         position: absolute;
         width: 45px;
         height: 45px;
-        background: rgba(255, 75, 75, 0.95); /* ストリームリット赤 */
+        background: rgba(255, 75, 75, 0.95);
         color: white;
         border: 2px solid white;
         border-radius: 50%;
@@ -104,25 +106,30 @@ components.html("""
         -webkit-tap-highlight-color: transparent;
     `;
 
-    // スクロール実行関数 (複数のターゲットを試す)
-    function scrollTarget(x, y) {
+    // ★修正ポイント: 正しいスクロールコンテナを特定する関数
+    function getScrollContainer() {
         const doc = window.parent.document;
-        // Streamlitのメインコンテナを探す
-        const targets = [
-            doc.querySelector('.stApp'),
-            doc.querySelector('section.main'),
-            doc.documentElement,
-            doc.body
-        ];
+        // Streamlitのバージョンによってクラス名が変わるが、
+        // data-testid="stAppViewContainer" は比較的安定している
+        let target = doc.querySelector('[data-testid="stAppViewContainer"]');
+        
+        // もし見つからなければ、メインセクションを探す
+        if (!target) target = doc.querySelector('section.main');
+        
+        return target;
+    }
 
-        for (let t of targets) {
-            if (t) {
-                t.scrollBy({ left: x, top: y, behavior: 'smooth' });
-            }
+    function scrollTarget(x, y) {
+        const container = getScrollContainer();
+        if (container) {
+            container.scrollBy({ left: x, top: y, behavior: 'smooth' });
+        } else {
+            // 万が一見つからない場合はwindowを試すが、これがズレの原因だった
+            // ここでは何もしないか、bodyのみ試す
+            console.log("Scroll container not found");
         }
     }
 
-    // ボタン生成関数 (タッチイベント対応)
     function createBtn(text, top, left, scrollX, scrollY) {
         const b = window.parent.document.createElement('div');
         b.innerHTML = text;
@@ -130,9 +137,8 @@ components.html("""
         b.style.top = top;
         b.style.left = left;
         
-        // タッチとクリックの両方で反応させる
         const action = (e) => {
-            e.preventDefault(); // デフォルト動作(選択など)を無効化
+            e.preventDefault();
             e.stopPropagation();
             scrollTarget(scrollX, scrollY);
         };
@@ -143,19 +149,12 @@ components.html("""
         return b;
     }
 
-    // 上下左右ボタンの配置 (140pxエリア内の座標)
-    // センター位置: 47.5px ( (140 - 45) / 2 )
-    
-    // 上
+    // 上下左右ボタン配置
     dpad.appendChild(createBtn('▲', '0px', '47.5px', 0, -300));
-    // 下
     dpad.appendChild(createBtn('▼', '95px', '47.5px', 0, 300));
-    // 左
     dpad.appendChild(createBtn('◀', '47.5px', '0px', -300, 0));
-    // 右
     dpad.appendChild(createBtn('▶', '47.5px', '95px', 300, 0));
 
-    // 親ウィンドウに追加
     window.parent.document.body.appendChild(dpad);
 
 </script>
@@ -252,16 +251,4 @@ if api_key:
                 if st.button("保存", use_container_width=True):
                     if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
                         buf = io.BytesIO()
-                        st.session_state['display_image'].save(buf, format='PNG')
-                        try:
-                            requests.post(GAS_APP_URL, json={
-                                'image': base64.b64encode(buf.getvalue()).decode(),
-                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            })
-                            st.success("保存しました")
-                        except: st.error("保存失敗")
-
-        except Exception as e:
-            st.error(f"画像エラー: {e}")
+                        st
