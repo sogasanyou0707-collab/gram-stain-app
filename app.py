@@ -4,13 +4,14 @@ import requests
 import io
 import base64
 import os
+import streamlit.components.v1 as components
 from PIL import Image, ImageFilter
 from datetime import datetime
 from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v15.0: Mode Switch)")
+st.title("🔬 グラム染色 AI (v16.0: Floating Nav)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -28,11 +29,10 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【使い方】\n1. 「移動モード」で菌の場所までスクロール\n2. 「枠操作モード」に切り替えて囲む")
+    st.info("【操作方法】\n画面両端の「矢印ボタン」を押すと横スクロールします。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
-    # 画質設定
     st.markdown("---")
     img_quality = st.select_slider(
         "画質 (幅ピクセル)",
@@ -53,27 +53,73 @@ with st.sidebar:
     valid_categories = [c for c in fetch_categories() if c not in ["Inbox", "my_gram_app", "pycache"] and not c.startswith(".")]
     if valid_categories: st.write("📂 カテゴリ:", valid_categories)
 
-# --- CSS: スクロール設定とポインター制御 ---
+# --- CSS: 画像幅の強制固定 ---
 st.markdown(f"""
 <style>
-    /* アプリ全体の横スクロールを許可 */
-    .stApp {{
-        overflow-x: auto !important;
-    }}
-    
-    /* 左詰め表示 */
-    .element-container, .stMarkdown, div[data-testid="stVerticalBlock"] {{
-        align-items: flex-start !important;
-        justify-content: flex-start !important;
-    }}
-
-    /* 画像エリアの幅固定 */
+    .stApp {{ overflow-x: auto !important; }}
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
     }}
 </style>
 """, unsafe_allow_html=True)
+
+# --- JavaScript: フローティング・スクロールボタンの注入 ---
+# 画面の左右に固定配置されるボタンを作成し、クリックでwindowをスクロールさせます
+components.html("""
+<style>
+    /* 共通ボタンスタイル */
+    .nav-btn {
+        position: fixed;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 60px;
+        height: 100px;
+        background-color: rgba(255, 75, 75, 0.7); /* 赤色・半透明 */
+        color: white;
+        font-size: 30px;
+        border: none;
+        border-radius: 10px;
+        z-index: 99999; /* 最前面に表示 */
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        user-select: none;
+    }
+    .nav-btn:active {
+        background-color: rgba(255, 0, 0, 0.9);
+    }
+    /* 左ボタン */
+    #left-btn { left: 10px; }
+    /* 右ボタン */
+    #right-btn { right: 10px; }
+</style>
+
+<div id="left-btn" class="nav-btn" onclick="scrollLeftWin()">◀</div>
+<div id="right-btn" class="nav-btn" onclick="scrollRightWin()">▶</div>
+
+<script>
+    // スクロール量
+    const scrollAmount = 200;
+
+    function scrollLeftWin() {
+        // 親ウィンドウ（Streamlitアプリ全体）をスクロール
+        window.parent.document.querySelector('.stApp').scrollBy({
+            left: -scrollAmount,
+            behavior: 'smooth'
+        });
+    }
+
+    function scrollRightWin() {
+        window.parent.document.querySelector('.stApp').scrollBy({
+            left: scrollAmount,
+            behavior: 'smooth'
+        });
+    }
+</script>
+""", height=0) # height=0で見えないようにし、ボタンだけfixedで浮かせる
 
 # --- メイン処理 ---
 if api_key:
@@ -98,35 +144,8 @@ if api_key:
             if sharpness:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
-            # --- 操作モード切替スイッチ (ラジオボタン) ---
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            
-            mode = st.radio(
-                "👇 操作モードを選択してください",
-                ["🖐️ 移動 (スクロール)", "✂️ 枠操作 (切り抜き)"],
-                horizontal=True,
-                index=0 # デフォルトは移動モード
-            )
-
-            # ★CSSマジック: 移動モードの時は、キャンバスのタッチ判定を無効化する
-            if mode == "🖐️ 移動 (スクロール)":
-                st.markdown("""
-                <style>
-                    iframe { pointer-events: none !important; }
-                </style>
-                <div style="background-color:#e3f2fd; padding:10px; border-radius:5px; color:#0d47a1;">
-                    <b>現在: 移動モード</b><br>
-                    画像の好きな場所を指でなぞってスクロールしてください。<br>
-                    場所が決まったら「枠操作」に切り替えてください。
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="background-color:#fbe9e7; padding:10px; border-radius:5px; color:#bf360c;">
-                    <b>現在: 枠操作モード</b><br>
-                    赤い枠を動かして、菌を囲んでください。
-                </div>
-                """, unsafe_allow_html=True)
+            st.caption("画面左右の **「◀ ▶ ボタン」** でスクロールできます")
 
             # 画像本体
             cropped_img = st_cropper(
