@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v16.0: Floating Nav)")
+st.title("🔬 グラム染色 AI (v17.0: Virtual D-Pad)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -29,7 +29,7 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画面両端の「矢印ボタン」を押すと横スクロールします。")
+    st.info("【操作方法】\n画面右下の「十字キー」でスクロールできます。\n(上下左右に対応)")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
@@ -56,7 +56,7 @@ with st.sidebar:
 # --- CSS: 画像幅の強制固定 ---
 st.markdown(f"""
 <style>
-    .stApp {{ overflow-x: auto !important; }}
+    .stApp {{ overflow: auto !important; }}
     iframe {{
         min-width: {img_quality}px !important;
         width: {img_quality}px !important;
@@ -64,62 +64,81 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: フローティング・スクロールボタンの注入 ---
-# 画面の左右に固定配置されるボタンを作成し、クリックでwindowをスクロールさせます
+# --- JavaScript: 画面最前面へのコントローラー注入 ---
+# Streamlitのiframeの壁を越えて、親ウィンドウ(本体)にボタンを設置します
 components.html("""
-<style>
-    /* 共通ボタンスタイル */
-    .nav-btn {
-        position: fixed;
-        top: 50%;
-        transform: translateY(-50%);
-        width: 60px;
-        height: 100px;
-        background-color: rgba(255, 75, 75, 0.7); /* 赤色・半透明 */
+<script>
+    // 既存のボタンがあれば削除 (重複防止)
+    const existing = window.parent.document.getElementById('gram-dpad');
+    if (existing) existing.remove();
+
+    // コントローラーのコンテナ作成
+    const dpad = window.parent.document.createElement('div');
+    dpad.id = 'gram-dpad';
+    dpad.style.position = 'fixed';
+    dpad.style.bottom = '20px';
+    dpad.style.right = '20px';
+    dpad.style.width = '120px';
+    dpad.style.height = '120px';
+    dpad.style.zIndex = '999999'; // 最前面
+    dpad.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    dpad.style.borderRadius = '50%';
+    dpad.style.touchAction = 'none'; // ブラウザのデフォルト動作防止
+
+    // 共通ボタンスタイル
+    const btnStyle = `
+        position: absolute;
+        width: 40px;
+        height: 40px;
+        background: rgba(255, 75, 75, 0.9);
         color: white;
-        font-size: 30px;
-        border: none;
-        border-radius: 10px;
-        z-index: 99999; /* 最前面に表示 */
-        cursor: pointer;
+        border: 2px solid white;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
+        font-size: 20px;
+        font-weight: bold;
+        cursor: pointer;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         user-select: none;
-    }
-    .nav-btn:active {
-        background-color: rgba(255, 0, 0, 0.9);
-    }
-    /* 左ボタン */
-    #left-btn { left: 10px; }
-    /* 右ボタン */
-    #right-btn { right: 10px; }
-</style>
+    `;
 
-<div id="left-btn" class="nav-btn" onclick="scrollLeftWin()">◀</div>
-<div id="right-btn" class="nav-btn" onclick="scrollRightWin()">▶</div>
-
-<script>
-    // スクロール量
-    const scrollAmount = 200;
-
-    function scrollLeftWin() {
-        // 親ウィンドウ（Streamlitアプリ全体）をスクロール
-        window.parent.document.querySelector('.stApp').scrollBy({
-            left: -scrollAmount,
-            behavior: 'smooth'
-        });
+    // ボタン生成関数
+    function createBtn(text, top, left, scrollX, scrollY) {
+        const b = window.parent.document.createElement('div');
+        b.innerHTML = text;
+        b.style.cssText = btnStyle;
+        b.style.top = top;
+        b.style.left = left;
+        
+        // タッチ時の動作
+        const scroll = () => {
+            window.parent.document.querySelector('.stApp').scrollBy({
+                left: scrollX,
+                top: scrollY,
+                behavior: 'smooth'
+            });
+        };
+        b.onclick = scroll;
+        return b;
     }
 
-    function scrollRightWin() {
-        window.parent.document.querySelector('.stApp').scrollBy({
-            left: scrollAmount,
-            behavior: 'smooth'
-        });
-    }
+    // 上下左右ボタンの配置 (120px x 120px の中での位置)
+    // 上
+    dpad.appendChild(createBtn('▲', '0px', '40px', 0, -250));
+    // 下
+    dpad.appendChild(createBtn('▼', '80px', '40px', 0, 250));
+    // 左
+    dpad.appendChild(createBtn('◀', '40px', '0px', -250, 0));
+    // 右
+    dpad.appendChild(createBtn('▶', '40px', '80px', 250, 0));
+
+    // 親ウィンドウに追加
+    window.parent.document.body.appendChild(dpad);
+
 </script>
-""", height=0) # height=0で見えないようにし、ボタンだけfixedで浮かせる
+""", height=0)
 
 # --- メイン処理 ---
 if api_key:
@@ -145,7 +164,7 @@ if api_key:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.caption("画面左右の **「◀ ▶ ボタン」** でスクロールできます")
+            st.info("👇 **画面右下のコントローラー** でスクロールしてください")
 
             # 画像本体
             cropped_img = st_cropper(
@@ -225,3 +244,4 @@ if api_key:
 
         except Exception as e:
             st.error(f"画像エラー: {e}")
+
