@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🔬", layout="wide")
-st.title("🔬 グラム染色 AI (v19.1: Slim Edge Scroll)")
+st.title("🔬 グラム染色 AI (v19.2: Force Scroll)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -29,7 +29,7 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画面の「上下左右の端（細いフチ）」を長押しすると、その方向にスクロールします。")
+    st.info("【操作方法】\n画面の「上下左右の細いフチ」を長押しすると、その方向にスクロールします。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
@@ -56,12 +56,15 @@ with st.sidebar:
 # --- CSS: 画像幅の強制固定 ---
 st.markdown(f"""
 <style>
-    /* コンテンツエリアだけスクロール許可 */
-    [data-testid="stAppViewContainer"] {{
+    /* 可能な限りスクロールを許可する設定 */
+    html, body, [data-testid="stAppViewContainer"] {{
         overflow: auto !important;
         -webkit-overflow-scrolling: touch;
-        /* 端っこの操作エリア(15px)が画像に重ならないように少し余白を開ける */
-        padding: 20px !important; 
+    }}
+    
+    /* 操作エリアと重ならないよう余白設定 */
+    [data-testid="stAppViewContainer"] {{
+        padding: 20px !important;
     }}
     
     iframe {{
@@ -71,79 +74,65 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 極細エッジスクロールの実装 ---
+# --- JavaScript: 「総当たり」エッジスクロール ---
 components.html("""
 <script>
-    // 既存のフレームがあれば削除
     const existing = window.parent.document.getElementById('scroll-frame');
     if (existing) existing.remove();
 
-    // フレームコンテナ作成
     const frame = window.parent.document.createElement('div');
     frame.id = 'scroll-frame';
     frame.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:999999;';
 
-    // ★修正点: 幅を40pxから15pxに変更 (3分の1程度に)
+    // 帯の太さ (15px)
     const edgeSize = '15px';
-    const edgeColor = 'rgba(0, 150, 255, 0.3)'; // 薄い青色で見えやすく（操作中は濃くなる）
+    const edgeColor = 'rgba(0, 150, 255, 0.3)';
+    const activeColor = 'rgba(0, 150, 255, 0.9)';
 
     const edgeStyle = `position:fixed; background:${edgeColor}; pointer-events:auto; touch-action:none;`;
     
     const edges = [
-        // 上
-        { style: `${edgeStyle} top:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:-40 },
-        // 下
-        { style: `${edgeStyle} bottom:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:40 },
-        // 左
-        { style: `${edgeStyle} top:0; left:0; width:${edgeSize}; height:100%;`, dx:-40, dy:0 },
-        // 右
-        { style: `${edgeStyle} top:0; right:0; width:${edgeSize}; height:100%;`, dx:40, dy:0 }
+        { style: `${edgeStyle} top:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:-50 },
+        { style: `${edgeStyle} bottom:0; left:0; width:100%; height:${edgeSize};`, dx:0, dy:50 },
+        { style: `${edgeStyle} top:0; left:0; width:${edgeSize}; height:100%;`, dx:-50, dy:0 },
+        { style: `${edgeStyle} top:0; right:0; width:${edgeSize}; height:100%;`, dx:50, dy:0 }
     ];
 
     let scrollInterval = null;
 
-    // ★強力スクロール関数: 動かせる要素を全部動かす
+    // ★総当たりスクロール関数
     function performScroll(dx, dy) {
-        const doc = window.parent.document;
-        const targets = [
-            doc.querySelector('[data-testid="stAppViewContainer"]'), // メイン
-            doc.querySelector('section.main'),
-            doc.documentElement,
-            doc.body
-        ];
+        // 1. まずウィンドウ全体を動かす
+        window.parent.scrollBy(dx, dy);
+
+        // 2. 画面内の「div」「section」「main」タグを全部調べて、スクロールできそうなやつを全部動かす
+        const elements = window.parent.document.querySelectorAll('div, section, main, [data-testid="stAppViewContainer"]');
         
-        let moved = false;
-        targets.forEach(el => {
-            if (el) {
+        elements.forEach(el => {
+            // スクロール可能な幅がある要素なら動かす
+            if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) {
                 el.scrollBy({ left: dx, top: dy, behavior: 'auto' });
-                moved = true;
             }
         });
-        
-        if(!moved) {
-            window.parent.scrollBy(dx, dy);
-        }
     }
 
     function startScroll(dx, dy, element) {
         if (scrollInterval) return;
         
-        // 触っていることがわかるように色を濃くする
-        element.style.backgroundColor = 'rgba(0, 150, 255, 0.8)';
+        element.style.backgroundColor = activeColor;
         
-        // 即座に一度動かす
+        // 初動
         performScroll(dx, dy);
 
-        // 連続で動かす
+        // 連続動作 (スピードアップ: 20ms間隔)
         scrollInterval = setInterval(() => {
             performScroll(dx, dy);
-        }, 30); // 30ms間隔で滑らかに
+        }, 20);
     }
 
     function stopScroll(element) {
         clearInterval(scrollInterval);
         scrollInterval = null;
-        // 色を元に戻す
         if(element) element.style.backgroundColor = edgeColor;
     }
 
@@ -151,15 +140,15 @@ components.html("""
         const div = window.parent.document.createElement('div');
         div.style.cssText = e.style;
         
-        // タッチイベント (スマホ用)
+        // スマホ用タッチイベント
         div.addEventListener('touchstart', (ev) => { 
-            ev.preventDefault(); // ブラウザの戻る操作などを防止
+            ev.preventDefault(); 
             startScroll(e.dx, e.dy, div); 
         }, {passive: false});
         
         div.addEventListener('touchend', () => stopScroll(div));
         
-        // マウスイベント (PC用)
+        // PC用マウスイベント
         div.addEventListener('mousedown', () => startScroll(e.dx, e.dy, div));
         div.addEventListener('mouseup', () => stopScroll(div));
         div.addEventListener('mouseleave', () => stopScroll(div));
@@ -195,7 +184,7 @@ if api_key:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.info("画面の **「青いフチ（端っこ）」** を長押しするとスクロールします")
+            st.info("画面の **「青いフチ」** を長押しするとスクロールします")
 
             # 画像本体
             cropped_img = st_cropper(
