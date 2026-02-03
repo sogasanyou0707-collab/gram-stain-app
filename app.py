@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v17.2: Target Fix)")
+st.title("🔬 グラム染色 AI (v18.0: Auto-Target Scroll)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -56,10 +56,13 @@ with st.sidebar:
 # --- CSS: 画像幅の強制固定 ---
 st.markdown(f"""
 <style>
-    /* Streamlitのメインコンテナにスクロール許可を与える */
+    /* 全体のスクロール設定を微調整 */
+    .stApp {{ overflow: hidden !important; }} /* 外枠のスクロールは禁止 */
+    
+    /* コンテンツエリアだけスクロール許可 */
     [data-testid="stAppViewContainer"] {{
         overflow: auto !important;
-        -webkit-overflow-scrolling: touch; /* スマホで滑らかに */
+        -webkit-overflow-scrolling: touch;
     }}
     
     iframe {{
@@ -69,7 +72,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 左下コントローラー (ターゲット修正版) ---
+# --- JavaScript: 自動検出スクロールコントローラー ---
 components.html("""
 <script>
     const existing = window.parent.document.getElementById('gram-dpad');
@@ -106,27 +109,35 @@ components.html("""
         -webkit-tap-highlight-color: transparent;
     `;
 
-    // ★修正ポイント: 正しいスクロールコンテナを特定する関数
-    function getScrollContainer() {
+    // ★スクロール可能な要素を探し出す関数
+    function findScrollableElement() {
         const doc = window.parent.document;
-        // Streamlitのバージョンによってクラス名が変わるが、
-        // data-testid="stAppViewContainer" は比較的安定している
-        let target = doc.querySelector('[data-testid="stAppViewContainer"]');
+        // 優先度1: Streamlitのビューコンテナ
+        let el = doc.querySelector('[data-testid="stAppViewContainer"]');
+        if (el && el.scrollWidth > el.clientWidth) return el;
+
+        // 優先度2: メインセクション
+        el = doc.querySelector('section.main');
+        if (el && el.scrollWidth > el.clientWidth) return el;
         
-        // もし見つからなければ、メインセクションを探す
-        if (!target) target = doc.querySelector('section.main');
-        
-        return target;
+        // 優先度3: スクロール可能なdivを全検索
+        const divs = doc.querySelectorAll('div');
+        for (let d of divs) {
+            const style = window.getComputedStyle(d);
+            if ((style.overflowX === 'auto' || style.overflowX === 'scroll') && d.scrollWidth > d.clientWidth) {
+                return d;
+            }
+        }
+        return null;
     }
 
     function scrollTarget(x, y) {
-        const container = getScrollContainer();
-        if (container) {
-            container.scrollBy({ left: x, top: y, behavior: 'smooth' });
+        const target = findScrollableElement();
+        if (target) {
+            target.scrollBy({ left: x, top: y, behavior: 'smooth' });
         } else {
-            // 万が一見つからない場合はwindowを試すが、これがズレの原因だった
-            // ここでは何もしないか、bodyのみ試す
-            console.log("Scroll container not found");
+            // 見つからない場合はwindow自体を試す（最後の手段）
+            window.parent.scrollBy({ left: x, top: y, behavior: 'smooth' });
         }
     }
 
@@ -149,11 +160,11 @@ components.html("""
         return b;
     }
 
-    // 上下左右ボタン配置
-    dpad.appendChild(createBtn('▲', '0px', '47.5px', 0, -300));
-    dpad.appendChild(createBtn('▼', '95px', '47.5px', 0, 300));
-    dpad.appendChild(createBtn('◀', '47.5px', '0px', -300, 0));
-    dpad.appendChild(createBtn('▶', '47.5px', '95px', 300, 0));
+    // 上下左右ボタン
+    dpad.appendChild(createBtn('▲', '0px', '47.5px', 0, -200));
+    dpad.appendChild(createBtn('▼', '95px', '47.5px', 0, 200));
+    dpad.appendChild(createBtn('◀', '47.5px', '0px', -200, 0));
+    dpad.appendChild(createBtn('▶', '47.5px', '95px', 200, 0));
 
     window.parent.document.body.appendChild(dpad);
 
