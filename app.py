@@ -11,7 +11,7 @@ from streamlit_cropper import st_cropper
 
 # === 設定エリア ===
 st.set_page_config(page_title="GramAI", page_icon="🩸", layout="wide")
-st.title("🔬 グラム染色 AI (v17.0: Virtual D-Pad)")
+st.title("🔬 グラム染色 AI (v17.1: Left D-Pad Fix)")
 
 # --- APIキー等の取得 ---
 api_key = None
@@ -29,7 +29,7 @@ with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
     
-    st.info("【操作方法】\n画面右下の「十字キー」でスクロールできます。\n(上下左右に対応)")
+    st.info("【操作方法】\n画面左下の「十字キー」でスクロールできます。")
     
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
     
@@ -64,11 +64,10 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# --- JavaScript: 画面最前面へのコントローラー注入 ---
-# Streamlitのiframeの壁を越えて、親ウィンドウ(本体)にボタンを設置します
+# --- JavaScript: 左下コントローラー (タッチ対応版) ---
 components.html("""
 <script>
-    // 既存のボタンがあれば削除 (重複防止)
+    // 既存のボタンがあれば削除
     const existing = window.parent.document.getElementById('gram-dpad');
     if (existing) existing.remove();
 
@@ -77,34 +76,53 @@ components.html("""
     dpad.id = 'gram-dpad';
     dpad.style.position = 'fixed';
     dpad.style.bottom = '20px';
-    dpad.style.right = '20px';
-    dpad.style.width = '120px';
-    dpad.style.height = '120px';
-    dpad.style.zIndex = '999999'; // 最前面
-    dpad.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+    dpad.style.left = '20px';  /* 左下に配置 */
+    dpad.style.width = '140px';
+    dpad.style.height = '140px';
+    dpad.style.zIndex = '999999';
+    dpad.style.backgroundColor = 'rgba(0, 0, 0, 0.1)'; /* 薄いグレー背景 */
     dpad.style.borderRadius = '50%';
     dpad.style.touchAction = 'none'; // ブラウザのデフォルト動作防止
 
-    // 共通ボタンスタイル
+    // 共通ボタンスタイル (指で押しやすいように少し大きく)
     const btnStyle = `
         position: absolute;
-        width: 40px;
-        height: 40px;
-        background: rgba(255, 75, 75, 0.9);
+        width: 45px;
+        height: 45px;
+        background: rgba(255, 75, 75, 0.95); /* ストリームリット赤 */
         color: white;
         border: 2px solid white;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 20px;
+        font-size: 24px;
         font-weight: bold;
         cursor: pointer;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.4);
         user-select: none;
+        -webkit-tap-highlight-color: transparent;
     `;
 
-    // ボタン生成関数
+    // スクロール実行関数 (複数のターゲットを試す)
+    function scrollTarget(x, y) {
+        const doc = window.parent.document;
+        // Streamlitのメインコンテナを探す
+        const targets = [
+            doc.querySelector('.stApp'),
+            doc.querySelector('section.main'),
+            doc.documentElement,
+            doc.body
+        ];
+
+        for (let t of targets) {
+            if (t) {
+                t.scrollBy({ left: x, top: y, behavior: 'smooth' });
+            }
+        }
+    }
+
+    // ボタン生成関数 (タッチイベント対応)
     function createBtn(text, top, left, scrollX, scrollY) {
         const b = window.parent.document.createElement('div');
         b.innerHTML = text;
@@ -112,27 +130,30 @@ components.html("""
         b.style.top = top;
         b.style.left = left;
         
-        // タッチ時の動作
-        const scroll = () => {
-            window.parent.document.querySelector('.stApp').scrollBy({
-                left: scrollX,
-                top: scrollY,
-                behavior: 'smooth'
-            });
+        // タッチとクリックの両方で反応させる
+        const action = (e) => {
+            e.preventDefault(); // デフォルト動作(選択など)を無効化
+            e.stopPropagation();
+            scrollTarget(scrollX, scrollY);
         };
-        b.onclick = scroll;
+
+        b.addEventListener('touchstart', action, {passive: false});
+        b.addEventListener('click', action);
+        
         return b;
     }
 
-    // 上下左右ボタンの配置 (120px x 120px の中での位置)
+    // 上下左右ボタンの配置 (140pxエリア内の座標)
+    // センター位置: 47.5px ( (140 - 45) / 2 )
+    
     // 上
-    dpad.appendChild(createBtn('▲', '0px', '40px', 0, -250));
+    dpad.appendChild(createBtn('▲', '0px', '47.5px', 0, -300));
     // 下
-    dpad.appendChild(createBtn('▼', '80px', '40px', 0, 250));
+    dpad.appendChild(createBtn('▼', '95px', '47.5px', 0, 300));
     // 左
-    dpad.appendChild(createBtn('◀', '40px', '0px', -250, 0));
+    dpad.appendChild(createBtn('◀', '47.5px', '0px', -300, 0));
     // 右
-    dpad.appendChild(createBtn('▶', '40px', '80px', 250, 0));
+    dpad.appendChild(createBtn('▶', '47.5px', '95px', 300, 0));
 
     // 親ウィンドウに追加
     window.parent.document.body.appendChild(dpad);
@@ -164,7 +185,7 @@ if api_key:
                 raw_image = raw_image.filter(ImageFilter.UnsharpMask(radius=2, percent=150))
 
             st.markdown(f"### 1. 解析エリアの選択 (幅: {target_width}px)")
-            st.info("👇 **画面右下のコントローラー** でスクロールしてください")
+            st.info("👇 **画面左下のコントローラー** でスクロールしてください")
 
             # 画像本体
             cropped_img = st_cropper(
@@ -182,66 +203,4 @@ if api_key:
             with col1:
                  st.image(cropped_img, caption="AI送信画像", use_container_width=True)
             
-            with col2:
-                st.write("")
-                if st.button("この範囲を解析する", type="primary", use_container_width=True):
-                    st.session_state['display_image'] = cropped_img
-                    
-                    with st.spinner("Gemini 2.5 Flash で解析中..."):
-                        try:
-                            prompt = f"""
-                            あなたは臨床微生物検査技師です。血液培養グラム染色(1000倍, カメラ{camera_mag}倍)の「切り抜き画像」を解析してください。
-                            
-                            指示: 画像内の菌体の特徴を詳細に分析してください。
-                            条件: 溶血ボトル(RBCなし, 背景無視)。
-                            判定困難時は「ACTION: REQUEST_SECOND_SLIDE」と理由を出力。
-                            最後は「CATEGORY:カテゴリ名」。
-                            """
-                            res = model.generate_content([prompt, cropped_img])
-                            st.session_state['last_result'] = res.text
-                        except Exception as e:
-                            st.error(f"AI解析エラー: {e}")
-
-            # === 結果表示エリア ===
-            if 'last_result' in st.session_state:
-                st.markdown("---")
-                st.subheader("3. 解析結果")
-                st.write(st.session_state['last_result'].replace("CATEGORY:", ""))
-                
-                match_cats = []
-                for line in st.session_state['last_result'].splitlines():
-                    if "CATEGORY:" in line:
-                        match_cats = [c.strip() for c in line.split("CATEGORY:")[1].split(',')]
-                
-                if match_cats and GAS_APP_URL:
-                    cols = st.columns(len(match_cats))
-                    for i, c in enumerate(match_cats):
-                        if c in valid_categories:
-                            with cols[i]:
-                                try:
-                                    r = requests.get(GAS_APP_URL, params={"action":"get_image","category":c}, timeout=5)
-                                    d = r.json()
-                                    if d.get("found"):
-                                        img = Image.open(io.BytesIO(base64.b64decode(d["image"])))
-                                        st.image(img, caption=c, use_container_width=True)
-                                except: pass
-                
-                st.markdown("---")
-                correct = st.selectbox("正解ラベル", ["選択してください"] + valid_categories)
-                if st.button("保存", use_container_width=True):
-                    if correct != "選択してください" and GAS_APP_URL and 'display_image' in st.session_state:
-                        buf = io.BytesIO()
-                        st.session_state['display_image'].save(buf, format='PNG')
-                        try:
-                            requests.post(GAS_APP_URL, json={
-                                'image': base64.b64encode(buf.getvalue()).decode(),
-                                'filename': f"CORRECT_{correct}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                                'folderId': DRIVE_FOLDER_ID,
-                                'mimeType': 'image/png'
-                            })
-                            st.success("保存しました")
-                        except: st.error("保存失敗")
-
-        except Exception as e:
-            st.error(f"画像エラー: {e}")
-
+            with col2:	
