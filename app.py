@@ -10,7 +10,7 @@ from datetime import datetime
 from streamlit_cropper import st_cropper
 
 st.set_page_config(page_title="GramAI", page_icon="🔬", layout="wide")
-st.title("🔬 グラム染色 AI (v19.6: Stable)")
+st.title("🔬 グラム染色 AI (v24.0: Pro/Flash Selector)")
 
 # --- API & Secrets ---
 api_key = None
@@ -27,8 +27,19 @@ except: pass
 with st.sidebar:
     st.header("⚙️ 設定")
     if not api_key: api_key = st.text_input("Gemini APIキー", type="password")
+    
+    # ★ モデル選択スイッチ (2.5 Flash vs 2.5 Pro)
+    st.markdown("### 🤖 モデル選択")
+    model_type = st.radio(
+        "精度と速度のバランス",
+        ["Gemini 2.5 Flash (高速)", "Gemini 2.5 Pro (高知能)"],
+        index=0,
+        help="Proは菌の形状をより深く分析しますが、処理に少し時間がかかります。"
+    )
+
     st.info("【操作】画面の「青いフチ」を長押しでスクロール")
     camera_mag = st.number_input("カメラ倍率 (x)", 1.0, 10.0, 1.0, 0.1)
+    
     st.markdown("---")
     scroll_speed = st.slider("スクロール速度", 5, 100, 20, 5)
     img_quality = st.select_slider("画質 (幅px)", options=[700, 1000, 1400, 2000], value=1400)
@@ -131,7 +142,17 @@ components.html(js_code.replace("__SPEED__", str(scroll_speed)), height=0)
 # --- Main Logic ---
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    # ★ モデル切り替えロジック
+    if "Pro" in model_type:
+        model_name = "gemini-2.5-pro"
+        btn_label = "解析開始 (Gemini 2.5 Pro)"
+    else:
+        model_name = "gemini-2.5-flash"
+        btn_label = "解析開始 (Gemini 2.5 Flash)"
+        
+    model = genai.GenerativeModel(model_name)
+    
     uploaded_file = st.file_uploader("画像をアップロード", type=["jpg", "png", "jpeg"])
 
     if uploaded_file is not None:
@@ -155,9 +176,10 @@ if api_key:
             col1, col2 = st.columns([1, 2])
             with col1: st.image(cropped_img, caption="送信画像", use_container_width=True)
             with col2:
-                if st.button("解析開始", type="primary", use_container_width=True):
+                # ボタンのラベルも連動して変化
+                if st.button(btn_label, type="primary", use_container_width=True):
                     st.session_state['display_image'] = cropped_img
-                    with st.spinner("AI解析中..."):
+                    with st.spinner(f"{model_name} で解析中..."):
                         try:
                             prompt = f"臨床微生物検査技師として血液培養グラム染色(1000倍, カメラ{camera_mag}倍)を解析。菌体特徴を詳述。条件:溶血ボトル(RBCなし)。判定困難時は再撮影依頼。最後は「CATEGORY:カテゴリ名」。"
                             res = model.generate_content([prompt, cropped_img])
@@ -200,3 +222,4 @@ if api_key:
                             st.success("保存完了")
                         except: st.error("保存失敗")
         except Exception as e: st.error(f"画像エラー: {e}")
+
